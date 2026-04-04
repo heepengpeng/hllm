@@ -23,14 +23,17 @@ class TestServer(unittest.TestCase):
         self.mock_model = Mock()
         self.mock_model.model_path = "test-model"
         self.mock_model.device = "cpu"
+        self.mock_model.backend_name = "pytorch"
         self.mock_model.config = Mock()
         self.mock_model.config.max_position_embeddings = 2048
         self.mock_model.config.vocab_size = 32000
         self.mock_model.tokenizer = Mock()
-        self.mock_model.tokenizer.encode.return_value = Mock(shape=(1, 5))
+        # encode 应该返回一个列表，以便 len() 可以工作
+        self.mock_model.tokenizer.encode.return_value = [1, 2, 3, 4, 5]
         self.mock_model.tokenizer.decode.return_value = "Hello world"
         self.mock_model.tokenizer.apply_chat_template.return_value = "<user>Hello</user>"
         self.mock_model.generate.return_value = "Generated text"
+        self.mock_model.get_info.return_value = {"name": "pytorch", "device": "cpu"}
 
         # 创建 mock 流式生成器
         def mock_stream():
@@ -196,11 +199,13 @@ class TestOpenAICompatibility(unittest.TestCase):
         self.mock_model = Mock()
         self.mock_model.model_path = "test-model"
         self.mock_model.device = "cpu"
+        self.mock_model.backend_name = "pytorch"
         self.mock_model.tokenizer = Mock()
-        self.mock_model.tokenizer.encode.return_value = Mock(shape=(1, 5))
+        self.mock_model.tokenizer.encode.return_value = [1, 2, 3, 4, 5]
         self.mock_model.tokenizer.decode.return_value = "Response"
         self.mock_model.tokenizer.apply_chat_template.return_value = "Formatted prompt"
         self.mock_model.generate.return_value = "Response text"
+        self.mock_model.get_info.return_value = {"name": "pytorch", "device": "cpu"}
 
         from hllm.server import app
         self.client = TestClient(app)
