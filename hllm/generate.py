@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 import logging
-from typing import List, Generator
+from collections.abc import Generator
 from transformers import PreTrainedModel
 from transformers import PreTrainedTokenizer
 
@@ -24,7 +24,6 @@ def generate(
     top_k: int = 50,
     repetition_penalty: float = 1.0,
     device: str = "cpu",
-    **kwargs
 ) -> str:
     """
     生成文本（非流式）
@@ -110,7 +109,6 @@ def stream_generate(
     top_k: int = 50,
     repetition_penalty: float = 1.0,
     device: str = "cpu",
-    **kwargs
 ) -> Generator[str, None, None]:
     """
     流式生成文本（yield token）
@@ -186,7 +184,7 @@ def stream_generate(
     logger.info("Streaming generation completed")
 
 
-def _apply_repetition_penalty(logits: torch.Tensor, generated_ids: torch.Tensor, penalty: float):
+def _apply_repetition_penalty(logits: torch.Tensor, generated_ids: torch.Tensor, penalty: float) -> None:
     """应用重复惩罚"""
     for token_id in generated_ids.unique():
         logits[0, token_id] = logits[0, token_id] / penalty
