@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Generator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .base import BaseBackend
 
@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from mlx_lm.tokenizer_utils import TokenizerWrapper
+    from types import ModuleType
 
 
 class MLXBackend(BaseBackend):
@@ -43,8 +44,10 @@ class MLXBackend(BaseBackend):
 
         logger.info(f"Loading MLX model from {self.model_path}")
 
-        # mlx_lm.load 返回 (model, tokenizer) 元组
-        self._model, self._tokenizer = load(self.model_path)
+        # mlx_lm.load 返回 (model, tokenizer) 或 (model, tokenizer, config) 元组
+        result = load(self.model_path)
+        self._model = result[0]
+        self._tokenizer = result[1]
 
         logger.info("MLX model loaded successfully")
 
@@ -59,8 +62,12 @@ class MLXBackend(BaseBackend):
         **kwargs
     ) -> str:
         """生成文本"""
+        from typing import cast
         from mlx_lm import generate as mlx_generate
         from mlx_lm.sample_utils import make_sampler
+
+        if self._model is None or self._tokenizer is None:
+            raise RuntimeError("Model not loaded. Call _load_model() first.")
 
         logger.info(f"MLX generating with max_tokens={max_new_tokens}")
 
@@ -91,8 +98,12 @@ class MLXBackend(BaseBackend):
         **kwargs
     ) -> Generator[str, None, None]:
         """流式生成文本"""
+        from typing import cast
         from mlx_lm import stream_generate as mlx_stream_generate
         from mlx_lm.sample_utils import make_sampler
+
+        if self._model is None or self._tokenizer is None:
+            raise RuntimeError("Model not loaded. Call _load_model() first.")
 
         logger.info(f"MLX streaming generation with max_tokens={max_new_tokens}")
 
@@ -120,13 +131,21 @@ class MLXBackend(BaseBackend):
 
     @property
     def eos_token_id(self) -> int | None:
-        return self._tokenizer.eos_token_id if self._tokenizer else None
+        from typing import cast
+        if self._tokenizer:
+            eos_id = getattr(self._tokenizer, 'eos_token_id', None)
+            if eos_id is not None and isinstance(eos_id, int):
+                return cast(int, eos_id)
+        return None
 
     @property
     def pad_token_id(self) -> int | None:
         # MLX tokenizer 可能没有 pad_token_id
-        if self._tokenizer and hasattr(self._tokenizer, 'pad_token_id'):
-            return self._tokenizer.pad_token_id
+        from typing import cast
+        if self._tokenizer:
+            pad_id = getattr(self._tokenizer, 'pad_token_id', None)
+            if pad_id is not None and isinstance(pad_id, int):
+                return cast(int, pad_id)
         return None
 
     @property
