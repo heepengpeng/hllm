@@ -8,11 +8,6 @@ on:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/light-llm-hp
-    permissions:
-      id-token: write  # 用于 OIDC 认证
 
     steps:
     - name: Checkout code
@@ -35,9 +30,10 @@ jobs:
       run: twine check dist/*
 
     - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      # 使用 PyPI API token 进行认证
-      # 需要在 GitHub Settings -> Secrets -> Actions 中添加 PYPI_API_TOKEN
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: twine upload dist/*
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
