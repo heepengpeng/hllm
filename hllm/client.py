@@ -1,175 +1,139 @@
 """
-HLLM REST API Client
+HLLM OpenAI Compatible REST API Client
 
-用于与 HLLM REST API 服务通信的 Python 客户端。
+与 OpenAI 官方客户端 API 兼容的 Python 客户端。
+可以配合 HLLM 服务使用，也可以替代 OpenAI 官方客户端。
 """
 
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Generator
 import json
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional, Union, Generator, Literal
 
 import requests
 
 
 @dataclass
-class GenerateResponse:
-    """文本生成响应"""
-    text: str
-    usage: Dict[str, int]
-
-
-@dataclass
 class ChatMessage:
     """聊天消息"""
-    role: str
+    role: Literal["system", "user", "assistant"]
     content: str
 
 
 @dataclass
-class ChatResponse:
-    """对话响应"""
+class ChatCompletionChoice:
+    """对话补全选项"""
+    index: int
     message: ChatMessage
+    finish_reason: Optional[str] = None
+
+
+@dataclass
+class ChatCompletionResponse:
+    """对话补全响应"""
+    id: str
+    object: str
+    created: int
+    model: str
+    choices: List[ChatCompletionChoice]
     usage: Dict[str, int]
 
 
 @dataclass
-class StreamChunk:
-    """流式生成块"""
-    token: str
+class CompletionChoice:
+    """文本补全选项"""
+    text: str
     index: int
+    finish_reason: Optional[str] = None
 
 
-class HLLMClient:
-    """
-    HLLM REST API 客户端
+@dataclass
+class CompletionResponse:
+    """文本补全响应"""
+    id: str
+    object: str
+    created: int
+    model: str
+    choices: List[CompletionChoice]
+    usage: Dict[str, int]
 
-    示例：
-        >>> client = HLLMClient("http://localhost:8000")
-        >>> response = client.generate("Hello, how are you?")
-        >>> print(response.text)
-    """
 
-    def __init__(self, base_url: str, timeout: float = 60.0):
-        """
-        初始化客户端
+@dataclass
+class StreamDelta:
+    """流式响应增量"""
+    role: Optional[str] = None
+    content: Optional[str] = None
 
-        Args:
-            base_url: API 基础 URL (如 http://localhost:8000)
-            timeout: 请求超时时间（秒）
-        """
-        self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
-        self.session = requests.Session()
 
-    def health(self) -> Dict[str, Any]:
-        """
-        健康检查
+@dataclass
+class StreamChoice:
+    """流式选项"""
+    index: int
+    delta: StreamDelta
+    finish_reason: Optional[str] = None
 
-        Returns:
-            服务状态信息
-        """
-        response = self.session.get(
-            f"{self.base_url}/health",
-            timeout=self.timeout
-        )
-        response.raise_for_status()
-        return response.json()
 
-    def get_models(self) -> Dict[str, Any]:
-        """
-        获取模型信息
+@dataclass
+class ChatCompletionStreamResponse:
+    """流式对话补全响应"""
+    id: str
+    object: str
+    created: int
+    model: str
+    choices: List[StreamChoice]
 
-        Returns:
-            模型配置信息
-        """
-        response = self.session.get(
-            f"{self.base_url}/models",
-            timeout=self.timeout
-        )
-        response.raise_for_status()
-        return response.json()
 
-    def generate(
+class ChatCompletionsAPI:
+    """对话补全 API（OpenAI 兼容）"""
+
+    def __init__(self, client: "HLLMClient"):
+        self._client = client
+
+    def create(
         self,
-        prompt: str,
-        max_new_tokens: int = 100,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
-        top_k: int = 50,
-        stream: bool = False
-    ) -> GenerateResponse:
+        model: str,
+        messages: List[Dict[str, str]],
+        max_tokens: Optional[int] = 100,
+        temperature: Optional[float] = 0.7,
+        top_p: Optional[float] = 0.9,
+        stream: bool = False,
+        **kwargs
+    ) -> Union[ChatCompletionResponse, Generator[ChatCompletionStreamResponse, None, None]]:
         """
-        生成文本
+        创建对话补全（与 OpenAI 兼容）
 
         Args:
-            prompt: 输入提示
-            max_new_tokens: 最大生成 token 数
+            model: 模型 ID
+            messages: 消息列表
+            max_tokens: 最大生成 token 数
             temperature: 温度系数
             top_p: Top-p 采样
-            top_k: Top-k 采样
-            stream: 是否流式返回（客户端流式请使用 generate_stream）
+            stream: 是否流式返回
 
         Returns:
-            生成响应
+            对话补全响应或流式生成器
         """
         data = {
-            "prompt": prompt,
-            "max_new_tokens": max_new_tokens,
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
-            "top_k": top_k,
             "stream": stream
         }
+        data.update(kwargs)
 
-        response = self.session.post(
-            f"{self.base_url}/generate",
-            json=data,
-            timeout=self.timeout
-        )
-        response.raise_for_status()
+        if stream:
+            return self._stream_create(data)
 
-        result = response.json()
-        return GenerateResponse(
-            text=result["text"],
-            usage=result["usage"]
-        )
+        response = self._client._post("/v1/chat/completions", data)
+        return self._parse_chat_response(response)
 
-    def generate_stream(
+    def _stream_create(
         self,
-        prompt: str,
-        max_new_tokens: int = 100,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
-        top_k: int = 50
-    ) -> Generator[StreamChunk, None, None]:
-        """
-        流式生成文本
-
-        Args:
-            prompt: 输入提示
-            max_new_tokens: 最大生成 token 数
-            temperature: 温度系数
-            top_p: Top-p 采样
-            top_k: Top-k 采样
-
-        Yields:
-            生成的 token 块
-        """
-        data = {
-            "prompt": prompt,
-            "max_new_tokens": max_new_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
-            "top_k": top_k
-        }
-
-        response = self.session.post(
-            f"{self.base_url}/generate/stream",
-            json=data,
-            stream=True,
-            timeout=self.timeout
-        )
-        response.raise_for_status()
+        data: Dict[str, Any]
+    ) -> Generator[ChatCompletionStreamResponse, None, None]:
+        """流式创建"""
+        response = self._client._post_stream("/v1/chat/completions", data)
 
         for line in response.iter_lines():
             if line:
@@ -180,83 +144,220 @@ class HLLMClient:
                         break
                     try:
                         chunk_data = json.loads(data_str)
-                        yield StreamChunk(
-                            token=chunk_data["token"],
-                            index=chunk_data["index"]
-                        )
+                        yield self._parse_stream_response(chunk_data)
                     except json.JSONDecodeError:
                         continue
 
-    def chat(
+    def _parse_chat_response(self, data: Dict) -> ChatCompletionResponse:
+        """解析对话响应"""
+        choices = []
+        for c in data.get("choices", []):
+            msg = c.get("message", {})
+            choices.append(ChatCompletionChoice(
+                index=c.get("index", 0),
+                message=ChatMessage(
+                    role=msg.get("role", "assistant"),
+                    content=msg.get("content", "")
+                ),
+                finish_reason=c.get("finish_reason")
+            ))
+
+        return ChatCompletionResponse(
+            id=data.get("id", ""),
+            object=data.get("object", "chat.completion"),
+            created=data.get("created", 0),
+            model=data.get("model", ""),
+            choices=choices,
+            usage=data.get("usage", {})
+        )
+
+    def _parse_stream_response(self, data: Dict) -> ChatCompletionStreamResponse:
+        """解析流式响应"""
+        choices = []
+        for c in data.get("choices", []):
+            delta = c.get("delta", {})
+            choices.append(StreamChoice(
+                index=c.get("index", 0),
+                delta=StreamDelta(
+                    role=delta.get("role"),
+                    content=delta.get("content")
+                ),
+                finish_reason=c.get("finish_reason")
+            ))
+
+        return ChatCompletionStreamResponse(
+            id=data.get("id", ""),
+            object=data.get("object", "chat.completion.chunk"),
+            created=data.get("created", 0),
+            model=data.get("model", ""),
+            choices=choices
+        )
+
+
+class CompletionsAPI:
+    """文本补全 API（OpenAI 兼容）"""
+
+    def __init__(self, client: "HLLMClient"):
+        self._client = client
+
+    def create(
         self,
-        messages: List[Dict[str, str]],
-        max_new_tokens: int = 200,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
-        top_k: int = 50
-    ) -> ChatResponse:
+        model: str,
+        prompt: Union[str, List[str]],
+        max_tokens: Optional[int] = 100,
+        temperature: Optional[float] = 0.7,
+        top_p: Optional[float] = 0.9,
+        stream: bool = False,
+        **kwargs
+    ) -> Union[CompletionResponse, Generator[ChatCompletionStreamResponse, None, None]]:
         """
-        对话生成
+        创建文本补全（与 OpenAI 兼容）
 
         Args:
-            messages: 消息列表，每个消息包含 role 和 content
-            max_new_tokens: 最大生成 token 数
+            model: 模型 ID
+            prompt: 提示文本
+            max_tokens: 最大生成 token 数
             temperature: 温度系数
             top_p: Top-p 采样
-            top_k: Top-k 采样
+            stream: 是否流式返回
 
         Returns:
-            对话响应
+            文本补全响应或流式生成器
         """
         data = {
-            "messages": messages,
-            "max_new_tokens": max_new_tokens,
+            "model": model,
+            "prompt": prompt,
+            "max_tokens": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
-            "top_k": top_k
+            "stream": stream
         }
+        data.update(kwargs)
 
+        if stream:
+            return self._stream_create(data)
+
+        response = self._client._post("/v1/completions", data)
+        return self._parse_completion_response(response)
+
+    def _stream_create(
+        self,
+        data: Dict[str, Any]
+    ) -> Generator[ChatCompletionStreamResponse, None, None]:
+        """流式创建"""
+        response = self._client._post_stream("/v1/completions", data)
+
+        for line in response.iter_lines():
+            if line:
+                line = line.decode("utf-8")
+                if line.startswith("data: "):
+                    data_str = line[6:]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk_data = json.loads(data_str)
+                        yield self._client.chat.completions._parse_stream_response(chunk_data)
+                    except json.JSONDecodeError:
+                        continue
+
+    def _parse_completion_response(self, data: Dict) -> CompletionResponse:
+        """解析补全响应"""
+        choices = []
+        for c in data.get("choices", []):
+            choices.append(CompletionChoice(
+                index=c.get("index", 0),
+                text=c.get("text", ""),
+                finish_reason=c.get("finish_reason")
+            ))
+
+        return CompletionResponse(
+            id=data.get("id", ""),
+            object=data.get("object", "text_completion"),
+            created=data.get("created", 0),
+            model=data.get("model", ""),
+            choices=choices,
+            usage=data.get("usage", {})
+        )
+
+
+class ModelsAPI:
+    """模型 API"""
+
+    def __init__(self, client: "HLLMClient"):
+        self._client = client
+
+    def list(self) -> Dict[str, Any]:
+        """获取模型列表"""
+        return self._client._get("/v1/models")
+
+
+class HLLMClient:
+    """
+    HLLM OpenAI 兼容 REST API 客户端
+
+    与 OpenAI 官方客户端 API 完全兼容。
+
+    示例：
+        >>> client = HLLMClient("http://localhost:8000")
+        >>> response = client.chat.completions.create(
+        ...     model="hllm-model",
+        ...     messages=[{"role": "user", "content": "Hello!"}]
+        ... )
+        >>> print(response.choices[0].message.content)
+    """
+
+    def __init__(self, base_url: str, api_key: Optional[str] = None, timeout: float = 60.0):
+        """
+        初始化客户端
+
+        Args:
+            base_url: API 基础 URL (如 http://localhost:8000)
+            api_key: API 密钥（HLLM 不需要，但兼容 OpenAI 格式）
+            timeout: 请求超时时间（秒）
+        """
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key or "not-needed"
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        })
+
+        # API 子模块（OpenAI 兼容）
+        self.chat = type('Chat', (), {'completions': ChatCompletionsAPI(self)})()
+        self.completions = CompletionsAPI(self)
+        self.models = ModelsAPI(self)
+
+    def _get(self, endpoint: str) -> Dict:
+        """GET 请求"""
+        response = self.session.get(
+            f"{self.base_url}{endpoint}",
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _post(self, endpoint: str, data: Dict) -> Dict:
+        """POST 请求"""
         response = self.session.post(
-            f"{self.base_url}/chat",
+            f"{self.base_url}{endpoint}",
             json=data,
             timeout=self.timeout
         )
         response.raise_for_status()
+        return response.json()
 
-        result = response.json()
-        message_data = result["message"]
-        return ChatResponse(
-            message=ChatMessage(
-                role=message_data["role"],
-                content=message_data["content"]
-            ),
-            usage=result["usage"]
+    def _post_stream(self, endpoint: str, data: Dict):
+        """流式 POST 请求"""
+        response = self.session.post(
+            f"{self.base_url}{endpoint}",
+            json=data,
+            stream=True,
+            timeout=self.timeout
         )
-
-    def chat_simple(
-        self,
-        message: str,
-        system: Optional[str] = None,
-        **kwargs
-    ) -> str:
-        """
-        简化的单轮对话
-
-        Args:
-            message: 用户消息
-            system: 系统提示（可选）
-            **kwargs: 其他参数传递给 chat()
-
-        Returns:
-            助手的回复内容
-        """
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": message})
-
-        response = self.chat(messages, **kwargs)
-        return response.message.content
+        response.raise_for_status()
+        return response
 
     def close(self) -> None:
         """关闭客户端会话"""

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "light-llm-hp"
-version = "0.2.0"
+version = "0.3.0"
 description = "A lightweight LLM inference framework"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -32,7 +32,9 @@ dependencies = [
 
 [project.optional-dependencies]
 api = [
-    "flask>=2.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
     "requests>=2.25.0",
 ]
 

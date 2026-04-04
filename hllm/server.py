@@ -1,16 +1,16 @@
 """
-HLLM REST API Server
+HLLM OpenAI Compatible REST API Server (FastAPI)
 
-提供基于 HTTP 的 LLM 推理服务。
+提供与 OpenAI API 兼容的 HTTP 服务。
 """
 
 import argparse
-import json
 import logging
-from typing import Optional, List, Dict, Any
+import time
+import uuid
+from typing import List, Optional, Union, Literal
 
-from flask import Flask, request, jsonify, Response
-from flask.typing import ResponseReturnValue
+from pydantic import BaseModel, Field
 
 from .model import HLLM
 
@@ -21,8 +21,6 @@ logging.basicConfig(
     datefmt='%H:%M:%S'
 )
 logger = logging.getLogger(__name__)
-
-app = Flask(__name__)
 
 # 全局模型实例
 _model: Optional[HLLM] = None
@@ -35,216 +33,361 @@ def get_model() -> HLLM:
     return _model
 
 
-@app.route("/health", methods=["GET"])
-def health() -> ResponseReturnValue:
-    """健康检查端点"""
-    try:
-        model = get_model()
-        return jsonify({
-            "status": "ok",
-            "model": model.model_path,
-            "device": model.device
-        })
-    except RuntimeError as e:
-        return _error_response("SERVICE_UNAVAILABLE", str(e), 503)
+# ============== Pydantic Models ==============
+
+class ChatMessage(BaseModel):
+    """聊天消息"""
+    role: Literal["system", "user", "assistant"]
+    content: str
 
 
-@app.route("/models", methods=["GET"])
-def get_models() -> ResponseReturnValue:
-    """获取模型信息"""
-    model = get_model()
-    config = model.config
-    return jsonify({
-        "model": model.model_path,
-        "device": model.device,
-        "max_length": getattr(config, "max_position_embeddings", None),
-        "vocab_size": getattr(config, "vocab_size", None)
-    })
+class ChatCompletionRequest(BaseModel):
+    """对话补全请求"""
+    model: str = "hllm-model"
+    messages: List[ChatMessage]
+    max_tokens: Optional[int] = Field(default=100, ge=1, le=4096)
+    temperature: Optional[float] = Field(default=0.7, ge=0.0, le=2.0)
+    top_p: Optional[float] = Field(default=0.9, ge=0.0, le=1.0)
+    top_k: Optional[int] = Field(default=50, ge=0)
+    stream: Optional[bool] = False
+    stop: Optional[Union[str, List[str]]] = None
 
 
-@app.route("/generate", methods=["POST"])
-def generate() -> ResponseReturnValue:
-    """文本生成端点"""
-    try:
-        data = request.get_json(force=True, silent=True)
-        if data is None:
-            return _error_response("INVALID_REQUEST", "Request body is required", 400)
-
-        prompt = data.get("prompt")
-        if not prompt:
-            return _error_response("INVALID_REQUEST", "Missing required field: prompt", 400)
-
-        # 获取可选参数
-        max_new_tokens = data.get("max_new_tokens", 100)
-        temperature = data.get("temperature", 0.7)
-        top_p = data.get("top_p", 0.9)
-        top_k = data.get("top_k", 50)
-        stream = data.get("stream", False)
-
-        model = get_model()
-
-        if stream:
-            return _stream_response(prompt, max_new_tokens, temperature, top_p, top_k)
-
-        # 非流式生成
-        input_ids = model.tokenizer.encode(prompt, return_tensors="pt")
-        prompt_tokens = input_ids.shape[1]
-
-        text = model.generate(
-            prompt=prompt,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k
-        )
-
-        output_ids = model.tokenizer.encode(text, return_tensors="pt")
-        completion_tokens = output_ids.shape[1]
-
-        return jsonify({
-            "text": text,
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens
-            }
-        })
-
-    except Exception as e:
-        logger.exception("Error in generate endpoint")
-        return _error_response("INTERNAL_ERROR", str(e), 500)
+class ChatCompletionResponseChoice(BaseModel):
+    """对话补全响应选项"""
+    index: int
+    message: ChatMessage
+    finish_reason: Optional[str] = "stop"
 
 
-@app.route("/chat", methods=["POST"])
-def chat() -> ResponseReturnValue:
-    """对话生成端点"""
-    try:
-        data = request.get_json(force=True, silent=True)
-        if data is None:
-            return _error_response("INVALID_REQUEST", "Request body is required", 400)
-
-        messages = data.get("messages")
-        if not messages or not isinstance(messages, list):
-            return _error_response("INVALID_REQUEST", "Missing or invalid field: messages", 400)
-
-        # 获取可选参数
-        max_new_tokens = data.get("max_new_tokens", 200)
-        temperature = data.get("temperature", 0.7)
-        top_p = data.get("top_p", 0.9)
-        top_k = data.get("top_k", 50)
-
-        model = get_model()
-
-        # 使用 chat template 格式化消息
-        prompt = model.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
-
-        input_ids = model.tokenizer.encode(prompt, return_tensors="pt")
-        prompt_tokens = input_ids.shape[1]
-
-        text = model.generate(
-            prompt=prompt,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k
-        )
-
-        output_ids = model.tokenizer.encode(text, return_tensors="pt")
-        completion_tokens = output_ids.shape[1]
-
-        return jsonify({
-            "message": {
-                "role": "assistant",
-                "content": text
-            },
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens
-            }
-        })
-
-    except Exception as e:
-        logger.exception("Error in chat endpoint")
-        return _error_response("INTERNAL_ERROR", str(e), 500)
+class ChatCompletionResponse(BaseModel):
+    """对话补全响应"""
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: List[ChatCompletionResponseChoice]
+    usage: dict
 
 
-@app.route("/generate/stream", methods=["POST"])
-def generate_stream() -> ResponseReturnValue:
-    """流式生成端点（SSE）"""
-    try:
-        data = request.get_json(force=True, silent=True)
-        if data is None:
-            return _error_response("INVALID_REQUEST", "Request body is required", 400)
-
-        prompt = data.get("prompt")
-        if not prompt:
-            return _error_response("INVALID_REQUEST", "Missing required field: prompt", 400)
-
-        max_new_tokens = data.get("max_new_tokens", 100)
-        temperature = data.get("temperature", 0.7)
-        top_p = data.get("top_p", 0.9)
-        top_k = data.get("top_k", 50)
-
-        return _stream_response(prompt, max_new_tokens, temperature, top_p, top_k)
-
-    except Exception as e:
-        logger.exception("Error in generate_stream endpoint")
-        return _error_response("INTERNAL_ERROR", str(e), 500)
+class ChatCompletionStreamChoice(BaseModel):
+    """流式对话补全选项"""
+    index: int
+    delta: dict
+    finish_reason: Optional[str] = None
 
 
-def _stream_response(
-    prompt: str,
-    max_new_tokens: int,
-    temperature: float,
-    top_p: float,
-    top_k: int
-) -> Response:
-    """生成 SSE 流式响应"""
-    model = get_model()
+class ChatCompletionStreamResponse(BaseModel):
+    """流式对话补全响应"""
+    id: str
+    object: str = "chat.completion.chunk"
+    created: int
+    model: str
+    choices: List[ChatCompletionStreamChoice]
 
-    def generate_sse():
-        index = 0
-        for token in model.stream_generate(
-            prompt=prompt,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k
-        ):
-            data = json.dumps({"token": token, "index": index})
-            yield f"data: {data}\n\n"
-            index += 1
-        yield "data: [DONE]\n\n"
 
-    return Response(
-        generate_sse(),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no"
-        }
+class CompletionRequest(BaseModel):
+    """文本补全请求"""
+    model: str = "hllm-model"
+    prompt: Union[str, List[str]]
+    max_tokens: Optional[int] = Field(default=100, ge=1, le=4096)
+    temperature: Optional[float] = Field(default=0.7, ge=0.0, le=2.0)
+    top_p: Optional[float] = Field(default=0.9, ge=0.0, le=1.0)
+    top_k: Optional[int] = Field(default=50, ge=0)
+    stream: Optional[bool] = False
+    stop: Optional[Union[str, List[str]]] = None
+
+
+class CompletionResponseChoice(BaseModel):
+    """文本补全响应选项"""
+    text: str
+    index: int
+    finish_reason: Optional[str] = "stop"
+
+
+class CompletionResponse(BaseModel):
+    """文本补全响应"""
+    id: str
+    object: str = "text_completion"
+    created: int
+    model: str
+    choices: List[CompletionResponseChoice]
+    usage: dict
+
+
+class ModelInfo(BaseModel):
+    """模型信息"""
+    id: str
+    object: str = "model"
+    created: int
+    owned_by: str = "hllm"
+
+
+class ModelListResponse(BaseModel):
+    """模型列表响应"""
+    object: str = "list"
+    data: List[ModelInfo]
+
+
+class ErrorResponse(BaseModel):
+    """错误响应"""
+    error: dict
+
+
+# ============== FastAPI App ==============
+
+try:
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import StreamingResponse
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app = FastAPI(
+        title="HLLM OpenAI Compatible API",
+        description="A lightweight LLM inference framework with OpenAI compatible API",
+        version="0.2.0"
     )
 
+    # CORS
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-def _error_response(code: str, message: str, status_code: int) -> ResponseReturnValue:
-    """生成错误响应"""
-    response = jsonify({
-        "error": {
-            "code": code,
-            "message": message
-        }
-    })
-    response.status_code = status_code
-    return response
+    @app.get("/v1/models", response_model=ModelListResponse)
+    async def list_models():
+        """获取模型列表"""
+        return ModelListResponse(
+            data=[
+                ModelInfo(
+                    id="hllm-model",
+                    created=int(time.time())
+                )
+            ]
+        )
 
+    @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
+    async def chat_completions(request: ChatCompletionRequest):
+        """对话补全（OpenAI 兼容）"""
+        try:
+            model = get_model()
+
+            # 使用 chat template 格式化消息
+            messages_dict = [{"role": m.role, "content": m.content} for m in request.messages]
+            prompt = model.tokenizer.apply_chat_template(
+                messages_dict,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+
+            if request.stream:
+                return StreamingResponse(
+                    _stream_chat_completion(request, prompt),
+                    media_type="text/event-stream"
+                )
+
+            # 计算 prompt tokens
+            input_ids = model.tokenizer.encode(prompt, return_tensors="pt")
+            prompt_tokens = input_ids.shape[1]
+
+            # 生成
+            start_time = time.time()
+            text = model.generate(
+                prompt=prompt,
+                max_new_tokens=request.max_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                top_k=request.top_k
+            )
+            completion_time = time.time() - start_time
+
+            output_ids = model.tokenizer.encode(text, return_tensors="pt")
+            completion_tokens = output_ids.shape[1]
+
+            logger.info(f"Chat completion: {prompt_tokens} prompt tokens, "
+                       f"{completion_tokens} completion tokens, "
+                       f"{completion_time:.2f}s")
+
+            return ChatCompletionResponse(
+                id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
+                created=int(time.time()),
+                model=request.model,
+                choices=[
+                    ChatCompletionResponseChoice(
+                        index=0,
+                        message=ChatMessage(role="assistant", content=text),
+                        finish_reason="stop"
+                    )
+                ],
+                usage={
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens
+                }
+            )
+
+        except Exception as e:
+            logger.exception("Error in chat_completions")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/v1/completions", response_model=CompletionResponse)
+    async def completions(request: CompletionRequest):
+        """文本补全（OpenAI 兼容）"""
+        try:
+            model = get_model()
+
+            # 处理 prompt
+            if isinstance(request.prompt, list):
+                prompt = request.prompt[0] if request.prompt else ""
+            else:
+                prompt = request.prompt
+
+            if request.stream:
+                return StreamingResponse(
+                    _stream_completion(request, prompt),
+                    media_type="text/event-stream"
+                )
+
+            # 计算 prompt tokens
+            input_ids = model.tokenizer.encode(prompt, return_tensors="pt")
+            prompt_tokens = input_ids.shape[1]
+
+            # 生成
+            text = model.generate(
+                prompt=prompt,
+                max_new_tokens=request.max_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                top_k=request.top_k
+            )
+
+            output_ids = model.tokenizer.encode(text, return_tensors="pt")
+            completion_tokens = output_ids.shape[1]
+
+            return CompletionResponse(
+                id=f"cmpl-{uuid.uuid4().hex[:8]}",
+                created=int(time.time()),
+                model=request.model,
+                choices=[
+                    CompletionResponseChoice(
+                        text=text,
+                        index=0,
+                        finish_reason="stop"
+                    )
+                ],
+                usage={
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens
+                }
+            )
+
+        except Exception as e:
+            logger.exception("Error in completions")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def _stream_chat_completion(request: ChatCompletionRequest, prompt: str):
+        """流式对话补全生成器"""
+        model = get_model()
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+        created = int(time.time())
+
+        # 发送角色
+        yield f"data: {ChatCompletionStreamResponse(
+            id=completion_id,
+            created=created,
+            model=request.model,
+            choices=[ChatCompletionStreamChoice(
+                index=0,
+                delta={"role": "assistant"},
+                finish_reason=None
+            )]
+        ).model_dump_json()}\n\n"
+
+        # 流式生成
+        for token in model.stream_generate(
+            prompt=prompt,
+            max_new_tokens=request.max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            top_k=request.top_k
+        ):
+            yield f"data: {ChatCompletionStreamResponse(
+                id=completion_id,
+                created=created,
+                model=request.model,
+                choices=[ChatCompletionStreamChoice(
+                    index=0,
+                    delta={"content": token},
+                    finish_reason=None
+                )]
+            ).model_dump_json()}\n\n"
+
+        # 发送结束标记
+        yield f"data: {ChatCompletionStreamResponse(
+            id=completion_id,
+            created=created,
+            model=request.model,
+            choices=[ChatCompletionStreamChoice(
+                index=0,
+                delta={},
+                finish_reason="stop"
+            )]
+        ).model_dump_json()}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+    async def _stream_completion(request: CompletionRequest, prompt: str):
+        """流式文本补全生成器"""
+        model = get_model()
+        completion_id = f"cmpl-{uuid.uuid4().hex[:8]}"
+        created = int(time.time())
+
+        # 流式生成
+        for token in model.stream_generate(
+            prompt=prompt,
+            max_new_tokens=request.max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            top_k=request.top_k
+        ):
+            yield f"data: {ChatCompletionStreamResponse(
+                id=completion_id,
+                created=created,
+                model=request.model,
+                choices=[ChatCompletionStreamChoice(
+                    index=0,
+                    delta={"content": token},
+                    finish_reason=None
+                )]
+            ).model_dump_json()}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+    @app.get("/health")
+    async def health():
+        """健康检查"""
+        try:
+            model = get_model()
+            return {
+                "status": "ok",
+                "model": model.model_path,
+                "device": model.device
+            }
+        except RuntimeError:
+            raise HTTPException(status_code=503, detail="Model not initialized")
+
+except ImportError:
+    app = None
+    logger.warning("FastAPI not installed, server module unavailable")
+
+
+# ============== Server Class ==============
 
 class Server:
-    """HLLM REST API 服务器"""
+    """HLLM OpenAI Compatible REST API Server"""
 
     def __init__(
         self,
@@ -265,25 +408,29 @@ class Server:
         self.host = host
         self.port = port
 
-    def start(self, debug: bool = False) -> None:
+    def start(self, reload: bool = False) -> None:
         """
         启动服务器
 
         Args:
-            debug: 是否开启调试模式
+            reload: 是否启用热重载
         """
-        logger.info(f"Starting HLLM server on {self.host}:{self.port}")
-        app.run(host=self.host, port=self.port, debug=debug, threaded=True)
+        if app is None:
+            raise RuntimeError("FastAPI not installed. Install with: pip install fastapi uvicorn")
+
+        import uvicorn
+        logger.info(f"Starting HLLM OpenAI compatible server on {self.host}:{self.port}")
+        uvicorn.run(app, host=self.host, port=self.port, reload=reload)
 
 
 def main():
     """命令行入口"""
-    parser = argparse.ArgumentParser(description="HLLM REST API Server")
+    parser = argparse.ArgumentParser(description="HLLM OpenAI Compatible REST API Server")
     parser.add_argument("--model", required=True, help="Model path")
     parser.add_argument("--device", default="cpu", help="Device (cpu/cuda/mps)")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind")
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
 
     args = parser.parse_args()
 
@@ -291,7 +438,7 @@ def main():
     model = HLLM(model_path=args.model, device=args.device)
 
     server = Server(model, host=args.host, port=args.port)
-    server.start(debug=args.debug)
+    server.start(reload=args.reload)
 
 
 if __name__ == "__main__":
