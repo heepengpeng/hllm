@@ -2,6 +2,7 @@
 
 支持多种推理后端：
 - pytorch: PyTorch 后端 (CPU/CUDA/MPS)
+- paged_pytorch: PyTorch + PagedAttention 优化 (GPU)
 - mlx: MLX 后端 (Apple Silicon)
 """
 
@@ -19,6 +20,11 @@ def _import_pytorch_backend():
     return PyTorchBackend
 
 
+def _import_paged_pytorch_backend():
+    from .paged_pytorch import PagedPyTorchBackend
+    return PagedPyTorchBackend
+
+
 def _import_mlx_backend():
     from .mlx import MLXBackend
     return MLXBackend
@@ -27,6 +33,7 @@ def _import_mlx_backend():
 # 后端注册表
 _BACKENDS = {
     "pytorch": _import_pytorch_backend,
+    "paged_pytorch": _import_paged_pytorch_backend,
     "mlx": _import_mlx_backend,
 }
 
@@ -87,14 +94,19 @@ def create_backend(
     return backend_class(model_path, **kwargs)
 
 
-def auto_select_backend(model_path: str) -> tuple[str, dict]:
+def auto_select_backend(model_path: str, use_paged_attention: bool = True) -> tuple[str, dict]:
     """自动选择最佳后端
 
     优先级:
     1. MLX (如果是 Apple Silicon)
     2. PyTorch MPS (如果是 Apple Silicon)
-    3. PyTorch CUDA
-    4. PyTorch CPU
+    3. Paged PyTorch CUDA (如果启用且可用)
+    4. PyTorch CUDA
+    5. PyTorch CPU
+    
+    Args:
+        model_path: 模型路径
+        use_paged_attention: 是否使用 PagedAttention (GPU 上)
     """
     import platform
 
@@ -114,6 +126,10 @@ def auto_select_backend(model_path: str) -> tuple[str, dict]:
     if torch.backends.mps.is_available():
         return "pytorch", {"model_path": model_path, "device": "mps"}
     elif torch.cuda.is_available():
-        return "pytorch", {"model_path": model_path, "device": "cuda"}
+        # 优先使用 PagedAttention
+        if use_paged_attention:
+            return "paged_pytorch", {"model_path": model_path, "device": "cuda"}
+        else:
+            return "pytorch", {"model_path": model_path, "device": "cuda"}
     else:
         return "pytorch", {"model_path": model_path, "device": "cpu"}
