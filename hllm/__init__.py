@@ -1,9 +1,10 @@
 from .model import HLLM
 from .tokenizer import Tokenizer
 from .generate import generate
+from .utils import download_model, ensure_model
 
-__version__ = "0.3.1"
-__all__ = ["HLLM", "Tokenizer", "generate"]
+__version__ = "0.4.5"
+__all__ = ["HLLM", "Tokenizer", "generate", "download_model", "ensure_model"]
 
 # 可选导入，避免未安装依赖时导入失败
 try:

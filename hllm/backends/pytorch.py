@@ -8,6 +8,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .base import BaseBackend
+from ..utils.model_downloader import ensure_model
 
 if TYPE_CHECKING:
     from transformers import PreTrainedModel, PreTrainedTokenizer
@@ -55,11 +56,19 @@ class PyTorchBackend(BaseBackend):
 
     def _load_model(self, **kwargs) -> None:
         """加载模型"""
-        logger.info(f"Loading PyTorch model from {self.model_path} on {self.device_name}")
+        # 自动下载模型（如果不是本地路径）
+        model_path = ensure_model(
+            self.model_path,
+            use_modelscope=kwargs.get("use_modelscope", True),
+            use_hf_mirror=kwargs.get("use_hf_mirror", True),
+            prefer_modelscope=kwargs.get("prefer_modelscope", True),
+        )
+        
+        logger.info(f"Loading PyTorch model from {model_path} on {self.device_name}")
 
         # 加载分词器
         self._tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
-            self.model_path,
+            model_path,
             trust_remote_code=self.trust_remote_code,
         )
 
@@ -77,7 +86,7 @@ class PyTorchBackend(BaseBackend):
             load_kwargs["attn_implementation"] = kwargs["attn_implementation"]
 
         self.model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            self.model_path,
+            model_path,
             **load_kwargs
         )
         self.model.to(self.device_name)

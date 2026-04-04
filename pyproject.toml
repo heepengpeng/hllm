@@ -38,6 +38,9 @@ mlx = [
     "mlx>=0.15.0",
     "mlx-lm>=0.15.0",
 ]
+modelscope = [
+    "modelscope>=1.10.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["hllm*"]
