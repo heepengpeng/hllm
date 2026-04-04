@@ -14,15 +14,21 @@ def main():
     # 初始化模型 (CPU)
     model = HLLM(model_path=model_path, device="cpu")
 
-    # 测试生成
+    # TinyLlama 使用 chat template，需要按照指定格式
+    # 格式: <|user|>\n{prompt}<|eot_id|><|assistant|>\n
     prompt = "Write a short story about a robot."
 
+    # 使用 tokenizer 的 apply_chat_template 构建正确的输入
+    messages = [{"role": "user", "content": prompt}]
+    prompt_formatted = model.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
     print(f"Prompt: {prompt}\n")
+    print(f"Formatted: {prompt_formatted[:100]}...\n")
     print("Generating...\n")
 
     # 非流式生成
     result = model.generate(
-        prompt,
+        prompt_formatted,
         max_new_tokens=100,
         temperature=0.7,
         top_p=0.9,
@@ -30,16 +36,6 @@ def main():
     )
 
     print(f"Result:\n{result}\n")
-
-    # 流式生成
-    print("Streaming generate:")
-    for token in model.stream_generate(
-        prompt,
-        max_new_tokens=50,
-        temperature=0.7,
-    ):
-        print(token, end="", flush=True)
-    print("\n")
 
 
 if __name__ == "__main__":

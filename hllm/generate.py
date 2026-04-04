@@ -1,8 +1,17 @@
 import torch
 import torch.nn.functional as F
+import logging
 from typing import List, Generator
 from transformers import PreTrainedModel
 from transformers import PreTrainedTokenizer
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
 def generate(
@@ -34,15 +43,18 @@ def generate(
     Returns:
         生成的文本
     """
+    logger.info(f"Starting generation with max_new_tokens={max_new_tokens}")
+
     # 编码输入
     input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
     input_length = input_ids.shape[1]
+    logger.info(f"Input encoded: {input_length} tokens")
 
     # 记录生成的 token IDs 用于惩罚
     generated_ids = input_ids.clone()
 
     # 生成循环
-    for _ in range(max_new_tokens):
+    for i in range(max_new_tokens):
         # 前向传播
         with torch.no_grad():
             outputs = model(input_ids)
@@ -70,11 +82,18 @@ def generate(
 
         # 检查是否生成结束
         if next_token.item() == tokenizer.eos_token_id:
+            logger.info(f"EOS token generated at step {i}")
             break
 
         # 追加到序列
         input_ids = torch.cat([input_ids, next_token], dim=1)
         generated_ids = torch.cat([generated_ids, next_token], dim=1)
+
+        # 每10个token输出一次进度
+        if (i + 1) % 10 == 0:
+            logger.info(f"Generated {i + 1} tokens")
+
+    logger.info(f"Generation completed: {input_length - input_length} new tokens")
 
     # 解码输出（排除输入 prompt）
     output_text = tokenizer.decode(input_ids[0][input_length:], skip_special_tokens=True)
@@ -110,15 +129,18 @@ def stream_generate(
     Yields:
         逐个生成的 token
     """
+    logger.info(f"Starting streaming generation with max_new_tokens={max_new_tokens}")
+
     # 编码输入
     input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
     input_length = input_ids.shape[1]
+    logger.info(f"Input encoded: {input_length} tokens")
 
     # 记录生成的 token IDs 用于惩罚
     generated_ids = input_ids.clone()
 
     # 生成循环
-    for _ in range(max_new_tokens):
+    for i in range(max_new_tokens):
         # 前向传播
         with torch.no_grad():
             outputs = model(input_ids)
@@ -146,6 +168,7 @@ def stream_generate(
 
         # 检查是否生成结束
         if next_token.item() == tokenizer.eos_token_id:
+            logger.info(f"EOS token generated at step {i}")
             break
 
         # 追加到序列
@@ -155,7 +178,12 @@ def stream_generate(
         # yield 生成的 token
         token_text = tokenizer.decode(next_token[0], skip_special_tokens=True)
         if token_text:  # 跳过空 token
+            # 每10个token输出一次进度
+            if (i + 1) % 10 == 0:
+                logger.info(f"Streamed {i + 1} tokens")
             yield token_text
+
+    logger.info("Streaming generation completed")
 
 
 def _apply_repetition_penalty(logits: torch.Tensor, generated_ids: torch.Tensor, penalty: float):
