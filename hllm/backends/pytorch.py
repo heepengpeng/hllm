@@ -58,7 +58,7 @@ class PyTorchBackend(BaseBackend):
         logger.info(f"Loading PyTorch model from {self.model_path} on {self.device_name}")
 
         # 加载分词器
-        self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
+        self._tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
             self.model_path,
             trust_remote_code=self.trust_remote_code,
         )
@@ -105,7 +105,7 @@ class PyTorchBackend(BaseBackend):
 
         return _generate(
             model=self.model,
-            tokenizer=self.tokenizer,
+            tokenizer=self._tokenizer,
             prompt=prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
@@ -131,7 +131,7 @@ class PyTorchBackend(BaseBackend):
 
         yield from _stream_generate(
             model=self.model,
-            tokenizer=self.tokenizer,
+            tokenizer=self._tokenizer,
             prompt=prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
@@ -144,12 +144,16 @@ class PyTorchBackend(BaseBackend):
 
     @property
     def eos_token_id(self) -> int | None:
-        return self.tokenizer.eos_token_id
+        return self._tokenizer.eos_token_id
 
     @property
     def pad_token_id(self) -> int | None:
-        return self.tokenizer.pad_token_id
+        return self._tokenizer.pad_token_id
 
     @property
     def config(self):
         return self.model.config
+
+    @property
+    def tokenizer(self):
+        return self._tokenizer

@@ -133,6 +133,11 @@ class MLXBackend(BaseBackend):
         return None
 
     @property
+    def tokenizer(self):
+        """返回分词器"""
+        return self._tokenizer
+
+    @property
     def config(self):
         """获取模型配置"""
         if self._model and hasattr(self._model, 'config'):

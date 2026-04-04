@@ -176,11 +176,17 @@ try:
 
             # 使用 chat template 格式化消息
             messages_dict = [{"role": m.role, "content": m.content} for m in request.messages]
-            prompt = model.tokenizer.apply_chat_template(
-                messages_dict,
-                tokenize=False,
-                add_generation_prompt=True
-            )
+            # 使用 tokenizer 的 chat template
+            if hasattr(model, 'tokenizer') and hasattr(model.tokenizer, 'apply_chat_template'):
+                prompt = model.tokenizer.apply_chat_template(
+                    messages_dict,
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+            else:
+                # 简单拼接
+                prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages_dict])
+                prompt += "\nassistant:"
 
             if request.stream:
                 return StreamingResponse(
@@ -189,8 +195,7 @@ try:
                 )
 
             # 计算 prompt tokens
-            input_ids = model.tokenizer.encode(prompt, return_tensors="pt")
-            prompt_tokens = input_ids.shape[1]
+            prompt_tokens = len(model.tokenizer.encode(prompt))
 
             # 生成
             start_time = time.time()
@@ -203,8 +208,7 @@ try:
             )
             completion_time = time.time() - start_time
 
-            output_ids = model.tokenizer.encode(text, return_tensors="pt")
-            completion_tokens = output_ids.shape[1]
+            completion_tokens = len(model.tokenizer.encode(text))
 
             logger.info(f"Chat completion: {prompt_tokens} prompt tokens, "
                        f"{completion_tokens} completion tokens, "
@@ -251,8 +255,7 @@ try:
                 )
 
             # 计算 prompt tokens
-            input_ids = model.tokenizer.encode(prompt, return_tensors="pt")
-            prompt_tokens = input_ids.shape[1]
+            prompt_tokens = len(model.tokenizer.encode(prompt))
 
             # 生成
             text = model.generate(
@@ -263,8 +266,7 @@ try:
                 top_k=request.top_k
             )
 
-            output_ids = model.tokenizer.encode(text, return_tensors="pt")
-            completion_tokens = output_ids.shape[1]
+            completion_tokens = len(model.tokenizer.encode(text))
 
             return CompletionResponse(
                 id=f"cmpl-{uuid.uuid4().hex[:8]}",
@@ -374,7 +376,8 @@ try:
             return {
                 "status": "ok",
                 "model": model.model_path,
-                "device": model.device
+                "backend": model.backend_name,
+                "info": model.get_info()
             }
         except RuntimeError:
             raise HTTPException(status_code=503, detail="Model not initialized")
@@ -426,8 +429,10 @@ class Server:
 def main():
     """命令行入口"""
     parser = argparse.ArgumentParser(description="HLLM OpenAI Compatible REST API Server")
-    parser.add_argument("--model", required=True, help="Model path")
-    parser.add_argument("--device", default="cpu", help="Device (cpu/cuda/mps)")
+    parser.add_argument("--model", required=True, help="Model path or HuggingFace model ID")
+    parser.add_argument("--backend", default="auto", choices=["auto", "pytorch", "mlx"],
+                        help="Inference backend (auto/pytorch/mlx)")
+    parser.add_argument("--device", default=None, help="Device for PyTorch backend (cpu/cuda/mps)")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
@@ -435,7 +440,15 @@ def main():
     args = parser.parse_args()
 
     logger.info(f"Loading model from {args.model}...")
-    model = HLLM(model_path=args.model, device=args.device)
+    logger.info(f"Backend: {args.backend}")
+
+    # 构建模型参数
+    model_kwargs = {"backend": args.backend}
+    if args.device:
+        model_kwargs["device"] = args.device
+
+    model = HLLM(model_path=args.model, **model_kwargs)
+    logger.info(f"Model loaded. Backend info: {model.get_info()}")
 
     server = Server(model, host=args.host, port=args.port)
     server.start(reload=args.reload)

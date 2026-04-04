@@ -157,6 +157,11 @@ class HLLM:
         """返回填充 token ID"""
         return self._backend.pad_token_id
 
+    @property
+    def tokenizer(self):
+        """返回分词器"""
+        return self._backend.tokenizer
+
     def get_info(self) -> dict:
         """获取模型信息"""
         info = self._backend.get_info()
