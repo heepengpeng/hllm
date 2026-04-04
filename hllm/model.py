@@ -1,81 +1,71 @@
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
-from typing import Optional, List
+from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class HLLM:
-    """HLLM: 轻量级 LLM 推理框架"""
+    """HLLM: 轻量级 LLM 推理框架
+    
+    支持多种后端：
+    - pytorch: PyTorch 后端 (CPU/CUDA/MPS)
+    - mlx: MLX 后端 (Apple Silicon, 推荐)
+    - auto: 自动选择最佳后端
+    """
 
     def __init__(
         self,
         model_path: str,
-        device: str = "cpu",
+        backend: str = "auto",
+        device: str | None = None,
         trust_remote_code: bool = True,
         torch_dtype: Optional[torch.dtype] = None,
+        **kwargs
     ):
         """
         初始化 HLLM 模型
 
         Args:
             model_path: HuggingFace 模型路径或本地路径
-            device: 运行设备 ("cpu", "cuda", "mps")
+            backend: 推理后端 ("auto", "pytorch", "mlx")
+            device: 运行设备 (仅 PyTorch 后端, "cpu", "cuda", "mps")
             trust_remote_code: 是否信任远程代码
-            torch_dtype: 模型数据类型
+            torch_dtype: 模型数据类型 (仅 PyTorch 后端)
+            **kwargs: 额外参数
         """
         self.model_path = model_path
-        self.device = self._normalize_device(device)
+        self.backend_name = backend
 
-        # 默认使用 float32 在 CPU 上
-        if torch_dtype is None:
-            torch_dtype = torch.float32
+        # 自动选择后端
+        if backend == "auto":
+            from .backends import auto_select_backend
+            backend_name, backend_kwargs = auto_select_backend(model_path)
+            # 合并用户参数
+            if device:
+                backend_kwargs["device"] = device
+            if torch_dtype:
+                backend_kwargs["torch_dtype"] = torch_dtype
+            backend_kwargs["trust_remote_code"] = trust_remote_code
+            backend_kwargs.update(kwargs)
+        else:
+            backend_name = backend
+            backend_kwargs = {
+                "model_path": model_path,
+                "trust_remote_code": trust_remote_code,
+            }
+            if device:
+                backend_kwargs["device"] = device
+            if torch_dtype:
+                backend_kwargs["torch_dtype"] = torch_dtype
+            backend_kwargs.update(kwargs)
 
-        logger.info(f"Loading model from {model_path} on {self.device}")
+        # 创建后端
+        from .backends import create_backend
+        self._backend = create_backend(backend_name, **backend_kwargs)
+        self.backend_name = backend_name
 
-        # 加载分词器
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_path,
-            trust_remote_code=trust_remote_code,
-        )
-
-        # 加载模型
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=torch_dtype,
-            trust_remote_code=trust_remote_code,
-            low_cpu_mem_usage=True,
-        )
-        self.model.to(self.device)
-        self.model.eval()
-
-        logger.info(f"Model loaded successfully")
-
-    def _normalize_device(self, device: str) -> str:
-        """标准化设备名称"""
-        if device == "mps" and not torch.backends.mps.is_available():
-            logger.warning("MPS not available, falling back to CPU")
-            return "cpu"
-        if device == "cuda" and not torch.cuda.is_available():
-            logger.warning("CUDA not available, falling back to CPU")
-            return "cpu"
-        return device
-
-    @property
-    def config(self) -> AutoConfig:
-        """返回模型配置"""
-        return self.model.config
-
-    @property
-    def eos_token_id(self) -> int:
-        """返回结束 token ID"""
-        return self.tokenizer.eos_token_id
-
-    @property
-    def bos_token_id(self) -> int:
-        """返回开始 token ID"""
-        return self.tokenizer.bos_token_id
+        logger.info(f"HLLM initialized with {backend_name} backend")
 
     def generate(
         self,
@@ -101,18 +91,13 @@ class HLLM:
         Returns:
             生成的文本
         """
-        from .generate import generate
-
-        return generate(
-            model=self.model,
-            tokenizer=self.tokenizer,
+        return self._backend.generate(
             prompt=prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
             repetition_penalty=repetition_penalty,
-            device=self.device,
             **kwargs
         )
 
@@ -140,17 +125,40 @@ class HLLM:
         Yields:
             生成的 token
         """
-        from .generate import stream_generate
-
-        yield from stream_generate(
-            model=self.model,
-            tokenizer=self.tokenizer,
+        yield from self._backend.stream_generate(
             prompt=prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
             repetition_penalty=repetition_penalty,
-            device=self.device,
             **kwargs
         )
+
+    @property
+    def config(self):
+        """返回模型配置"""
+        return self._backend.config
+
+    @property
+    def eos_token_id(self) -> int | None:
+        """返回结束 token ID"""
+        return self._backend.eos_token_id
+
+    @property
+    def bos_token_id(self) -> int | None:
+        """返回开始 token ID"""
+        if hasattr(self._backend, 'bos_token_id'):
+            return self._backend.bos_token_id
+        return None
+
+    @property
+    def pad_token_id(self) -> int | None:
+        """返回填充 token ID"""
+        return self._backend.pad_token_id
+
+    def get_info(self) -> dict:
+        """获取模型信息"""
+        info = self._backend.get_info()
+        info["backend"] = self.backend_name
+        return info
