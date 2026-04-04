@@ -162,12 +162,19 @@ def main():
         print("⚠️  本测试专为 Apple Silicon (M1/M2/M3) 设计")
         print("   当前平台可能无法运行 MLX 后端")
 
-    # 测试配置 (本地模型路径)
-    MODEL = "/Users/hp/CodeBuddy/hllm/models/llama-3.2-1b"
+    # 测试配置
+    # 使用相同的 Llama-3.2-1B 模型进行对比
+    # MLX 使用 4-bit 量化版，PyTorch 使用原始版本
+    MODEL_NAME = "Llama-3.2-1B-Instruct"
+    MLX_MODEL = "/Users/hp/CodeBuddy/hllm/models/llama-3.2-1b"  # 4-bit 量化 (MLX)
+    PYTORCH_MODEL = "/Users/hp/CodeBuddy/hllm/models/llama-3.2-1b-pytorch"  # 原始版本 (PyTorch)
+
     PROMPT = "Explain quantum computing in simple terms. Start with:"
     MAX_TOKENS = 50
 
-    print(f"\n模型: {MODEL}")
+    print(f"\n测试模型: {MODEL_NAME}")
+    print(f"MLX 模型: {MLX_MODEL} (4-bit 量化)")
+    print(f"PyTorch 模型: {PYTORCH_MODEL} (原始版本)")
     print(f"提示: {PROMPT[:50]}...")
     print(f"生成长度: {MAX_TOKENS} tokens")
 
@@ -177,7 +184,7 @@ def main():
     try:
         import mlx
         result = benchmark_backend(
-            "mlx", MODEL, PROMPT,
+            "mlx", MLX_MODEL, PROMPT,
             max_new_tokens=MAX_TOKENS,
             warmup=1, runs=3
         )
@@ -188,17 +195,36 @@ def main():
     except Exception as e:
         print(f"\n❌ MLX 测试失败: {e}")
 
-    # 2. 测试 PyTorch MPS (如果可用) - 注意：PyTorch 无法加载 MLX 量化模型
-    # 如需测试 PyTorch，请使用非量化模型如 "microsoft/Phi-3-mini-4k-instruct"
+    # 2. 测试 PyTorch (使用原始非量化模型)
     import torch
+
+    # 2.1 测试 PyTorch MPS (如果可用)
     if torch.backends.mps.is_available():
-        print("\n⚠️  跳过 PyTorch MPS 测试 (无法加载 MLX 量化模型)")
-        print("   如需测试，请使用非量化模型如 'microsoft/Phi-3-mini-4k-instruct'")
+        try:
+            result = benchmark_backend(
+                "pytorch", PYTORCH_MODEL, PROMPT,
+                max_new_tokens=MAX_TOKENS,
+                device="mps",
+                dtype=torch.float16,
+                warmup=1, runs=3
+            )
+            results.append(result)
+        except Exception as e:
+            print(f"\n❌ PyTorch MPS 测试失败: {e}")
     else:
         print("\n⚠️  MPS 不可用，跳过 PyTorch MPS 测试")
 
-    # 3. 测试 PyTorch CPU - 同样跳过
-    print("\n⚠️  跳过 PyTorch CPU 测试 (无法加载 MLX 量化模型)")
+    # 2.2 测试 PyTorch CPU (使用原始非量化模型)
+    try:
+        result = benchmark_backend(
+            "pytorch", PYTORCH_MODEL, PROMPT,
+            max_new_tokens=MAX_TOKENS,
+            device="cpu",
+            warmup=1, runs=2  # CPU 较慢，减少 runs
+        )
+        results.append(result)
+    except Exception as e:
+        print(f"\n❌ PyTorch CPU 测试失败: {e}")
 
     # 打印对比结果
     if results:
