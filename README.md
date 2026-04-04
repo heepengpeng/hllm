@@ -1,7 +1,7 @@
 # light-llm-hp - 轻量级 LLM 推理框架
 
 [![PyPI version](https://badge.fury.io/py/light-llm-hp.svg)](https://badge.fury.io/py/light-llm-hp)
-[![Python Versions](https://img.shields.io/pypi/pyversions/light-llm-hp.svg)](https://pypi.org/project/light-llm-hp/)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://pypi.org/project/light-llm-hp/)
 [![Coverage](https://img.shields.io/badge/coverage-72%25-yellow)](docs/coverage_report.md)
 [![CI](https://github.com/heepengpeng/hllm/actions/workflows/ci.yml/badge.svg)](https://github.com/heepengpeng/hllm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
