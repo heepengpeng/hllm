@@ -79,22 +79,35 @@ def benchmark_backend(
     total_times = []
 
     for i in range(runs):
-        # 测量首 token 时间
+        # 测量生成时间
         start = time.time()
-        # 流式生成来测量首 token
+
+        # 使用流式生成来测量首 token 时间
         tokens = []
-        for j, token in enumerate(model.stream_generate(prompt, max_new_tokens=max_new_tokens)):
-            if j == 0:
-                first_token_time = time.time() - start
-                first_token_times.append(first_token_time)
-            tokens.append(token)
+        first_token_measured = False
+
+        try:
+            for j, token in enumerate(model.stream_generate(prompt, max_new_tokens=max_new_tokens)):
+                if not first_token_measured:
+                    first_token_time = time.time() - start
+                    first_token_times.append(first_token_time)
+                    first_token_measured = True
+                tokens.append(token)
+        except Exception as e:
+            # 如果流式生成失败，回退到普通生成
+            print(f"  Stream failed, using regular generate: {e}")
+            result = model.generate(prompt, max_new_tokens=max_new_tokens)
+            first_token_time = time.time() - start  # 估算
+            first_token_times.append(first_token_time)
+            tokens = result.split()  # 估算 token 数
 
         total_time = time.time() - start
         total_times.append(total_time)
 
-        print(f"  Run {i+1}: {len(tokens)} tokens in {total_time:.2f}s "
-              f"({len(tokens)/total_time:.1f} tok/s), "
-              f"first token: {first_token_time*1000:.1f}ms")
+        actual_tokens = len(tokens) if isinstance(tokens, list) else max_new_tokens
+        print(f"  Run {i+1}: {actual_tokens} tokens in {total_time:.2f}s "
+              f"({actual_tokens/total_time:.1f} tok/s), "
+              f"first token: {first_token_times[-1]*1000:.1f}ms")
 
     avg_first_token = mean(first_token_times)
     avg_total_time = mean(total_times)
@@ -149,8 +162,8 @@ def main():
         print("⚠️  本测试专为 Apple Silicon (M1/M2/M3) 设计")
         print("   当前平台可能无法运行 MLX 后端")
 
-    # 测试配置
-    MODEL = "mlx-community/Llama-3.2-1B-Instruct-4bit"
+    # 测试配置 (本地模型路径)
+    MODEL = "/Users/hp/CodeBuddy/hllm/models/llama-3.2-1b"
     PROMPT = "Explain quantum computing in simple terms. Start with:"
     MAX_TOKENS = 50
 
@@ -175,34 +188,17 @@ def main():
     except Exception as e:
         print(f"\n❌ MLX 测试失败: {e}")
 
-    # 2. 测试 PyTorch MPS (如果可用)
+    # 2. 测试 PyTorch MPS (如果可用) - 注意：PyTorch 无法加载 MLX 量化模型
+    # 如需测试 PyTorch，请使用非量化模型如 "microsoft/Phi-3-mini-4k-instruct"
     import torch
     if torch.backends.mps.is_available():
-        try:
-            result = benchmark_backend(
-                "pytorch", MODEL, PROMPT,
-                max_new_tokens=MAX_TOKENS,
-                device="mps",
-                dtype=torch.float16,
-                warmup=1, runs=3
-            )
-            results.append(result)
-        except Exception as e:
-            print(f"\n❌ PyTorch MPS 测试失败: {e}")
+        print("\n⚠️  跳过 PyTorch MPS 测试 (无法加载 MLX 量化模型)")
+        print("   如需测试，请使用非量化模型如 'microsoft/Phi-3-mini-4k-instruct'")
     else:
         print("\n⚠️  MPS 不可用，跳过 PyTorch MPS 测试")
 
-    # 3. 测试 PyTorch CPU
-    try:
-        result = benchmark_backend(
-            "pytorch", MODEL, PROMPT,
-            max_new_tokens=MAX_TOKENS,
-            device="cpu",
-            warmup=1, runs=2  # CPU 较慢，减少 runs
-        )
-        results.append(result)
-    except Exception as e:
-        print(f"\n❌ PyTorch CPU 测试失败: {e}")
+    # 3. 测试 PyTorch CPU - 同样跳过
+    print("\n⚠️  跳过 PyTorch CPU 测试 (无法加载 MLX 量化模型)")
 
     # 打印对比结果
     if results:

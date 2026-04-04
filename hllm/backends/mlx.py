@@ -61,19 +61,23 @@ class MLXBackend(BaseBackend):
         """生成文本"""
         from mlx_lm import generate as mlx_generate
 
-        # MLX 使用 repetition_context_size 而不是 repetition_penalty
-        # 我们需要自己实现重复惩罚逻辑，或者使用 mlx 的方式
-
         logger.info(f"MLX generating with max_tokens={max_new_tokens}")
 
-        # mlx_lm.generate 的接口略有不同
+        # 构建生成参数
+        gen_kwargs = {"max_tokens": max_new_tokens}
+
+        # mlx_lm.generate 使用 temp 而不是 temperature
+        if temperature != 1.0:
+            gen_kwargs["temp"] = temperature
+        if top_p != 1.0:
+            gen_kwargs["top_p"] = top_p
+
         response = mlx_generate(
             self._model,
             self._tokenizer,
             prompt=prompt,
-            max_tokens=max_new_tokens,
-            temp=temperature,
-            top_p=top_p,
+            verbose=False,
+            **gen_kwargs
         )
 
         return response
@@ -89,29 +93,29 @@ class MLXBackend(BaseBackend):
         **kwargs
     ) -> Generator[str, None, None]:
         """流式生成文本"""
-        import mlx.core as mx
+        from mlx_lm import stream_generate as mlx_stream_generate
 
         logger.info(f"MLX streaming generation with max_tokens={max_new_tokens}")
 
-        # 编码输入
-        tokens = self._tokenizer.encode(prompt)
-        prompt_tokens = mx.array(tokens)
+        # 构建生成参数
+        gen_kwargs = {"max_tokens": max_new_tokens}
+        if temperature != 1.0:
+            gen_kwargs["temp"] = temperature
+        if top_p != 1.0:
+            gen_kwargs["top_p"] = top_p
 
-        # 使用 mlx_lm 的 stream_generate
-        from mlx_lm.utils import stream_generate as mlx_stream_generate
-
-        for token, _ in mlx_stream_generate(
+        # mlx_lm.stream_generate 返回 GenerationResponse 对象
+        for response in mlx_stream_generate(
             self._model,
             self._tokenizer,
-            prompt_tokens,
-            max_tokens=max_new_tokens,
-            temp=temperature,
-            top_p=top_p,
+            prompt=prompt,
+            **gen_kwargs
         ):
-            # 解码单个 token
-            text = self._tokenizer.decode([token])
-            if text:
-                yield text
+            # GenerationResponse 有 text 属性
+            if hasattr(response, 'text'):
+                yield response.text
+            else:
+                yield str(response)
 
     @property
     def device_name(self) -> str:

@@ -33,7 +33,7 @@ class PyTorchBackend(BaseBackend):
         trust_remote_code: bool = True,
         **kwargs
     ):
-        self.device_name = self._normalize_device(device)
+        self._device_name = self._normalize_device(device)
         self.torch_dtype = torch_dtype or torch.float32
         self.trust_remote_code = trust_remote_code
         super().__init__(model_path, **kwargs)
@@ -47,6 +47,11 @@ class PyTorchBackend(BaseBackend):
             logger.warning("CUDA not available, falling back to CPU")
             return "cpu"
         return device
+
+    @property
+    def device_name(self) -> str:
+        """返回设备名称"""
+        return self._device_name
 
     def _load_model(self, **kwargs) -> None:
         """加载模型"""
