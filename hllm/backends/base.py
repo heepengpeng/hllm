@@ -104,6 +104,12 @@ class BaseBackend(ABC):
         pass
 
     @property
+    @abstractmethod
+    def tokenizer(self) -> Any:
+        """返回分词器"""
+        pass
+
+    @property
     def bos_token_id(self) -> int | None:
         """返回开始 token ID (可选)"""
         return None

@@ -1,6 +1,9 @@
 import torch
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import logging
+
+if TYPE_CHECKING:
+    from .backends.base import BaseBackend
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +65,7 @@ class HLLM:
 
         # 创建后端
         from .backends import create_backend
-        self._backend = create_backend(backend_name, **backend_kwargs)
+        self._backend: "BaseBackend" = create_backend(backend_name, **backend_kwargs)
         self.backend_name = backend_name
 
         logger.info(f"HLLM initialized with {backend_name} backend")
