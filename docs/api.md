@@ -192,11 +192,16 @@ data: [DONE]
 ## 使用 OpenAI 官方客户端
 
 ```python
+import httpx
 from openai import OpenAI
+
+# 注意：需要禁用代理以避免 502 错误
+http_client = httpx.Client(trust_env=False)
 
 client = OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="not-needed"  # HLLM 不验证 API key
+    api_key="not-needed",  # HLLM 不验证 API key
+    http_client=http_client  # 使用自定义 http_client
 )
 
 # 对话
@@ -219,6 +224,10 @@ for chunk in client.chat.completions.create(
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="")
 ```
+
+**注意：** 如果系统设置了代理环境变量（如 `HTTP_PROXY`），OpenAI 客户端的默认 `httpx` 会读取这些设置导致连接失败（502 错误）。需要使用 `httpx.Client(trust_env=False)` 禁用代理。
+
+完整示例见 `examples/test_openai_client.py`。
 
 ## 使用 HLLM 内置客户端
 

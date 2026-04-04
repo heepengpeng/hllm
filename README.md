@@ -15,7 +15,7 @@ result = model.generate("Write a short story about a robot.")
 print(result)
 ```
 
-## REST API 服务
+## REST API 服务 (OpenAI 兼容)
 
 ### 安装 API 依赖
 
@@ -25,52 +25,42 @@ pip install light-llm-hp[api]
 
 ### 启动服务
 
-```python
-from hllm import HLLM
-from hllm.server import Server
-
-model = HLLM(model_path="./TinyLlama-1.1B-Chat-v1.0", device="cpu")
-server = Server(model, host="0.0.0.0", port=8000)
-server.start()
-```
-
-或通过命令行：
-
 ```bash
 python -m hllm.server --model ./TinyLlama-1.1B-Chat-v1.0 --port 8000
 ```
 
-### API 端点
+### 使用 OpenAI 官方客户端
+
+```python
+import httpx
+from openai import OpenAI
+
+# 禁用代理避免 502 错误
+http_client = httpx.Client(trust_env=False)
+
+client = OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="not-needed",
+    http_client=http_client
+)
+
+# 对话
+response = client.chat.completions.create(
+    model="hllm-model",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+print(response.choices[0].message.content)
+```
+
+完整示例：[examples/test_openai_client.py](examples/test_openai_client.py)
+
+### OpenAI 兼容端点
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/health` | GET | 健康检查 |
-| `/models` | GET | 模型信息 |
-| `/generate` | POST | 文本生成 |
-| `/chat` | POST | 对话生成 |
-| `/generate/stream` | POST | 流式生成 (SSE) |
-
-### 使用客户端
-
-```python
-from hllm.client import HLLMClient
-
-client = HLLMClient("http://localhost:8000")
-
-# 生成文本
-response = client.generate("Hello, how are you?")
-print(response.text)
-
-# 对话
-response = client.chat([
-    {"role": "user", "content": "What is AI?"}
-])
-print(response.message.content)
-
-# 流式生成
-for chunk in client.generate_stream("Tell me a story"):
-    print(chunk.token, end="", flush=True)
-```
+| `/v1/models` | GET | 模型列表 |
+| `/v1/chat/completions` | POST | 对话补全 (支持流式) |
+| `/v1/completions` | POST | 文本补全 (支持流式) |
 
 详细 API 文档见 [docs/api.md](docs/api.md)。
 

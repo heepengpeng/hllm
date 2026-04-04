@@ -2,7 +2,7 @@ from .model import HLLM
 from .tokenizer import Tokenizer
 from .generate import generate
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __all__ = ["HLLM", "Tokenizer", "generate"]
 
 # 可选导入，避免未安装依赖时导入失败
