@@ -14,5 +14,8 @@ dependencies = [
     "accelerate>=0.20.0",
 ]
 
+[tool.setuptools.packages.find]
+include = ["hllm*"]
+
 [project.urls]
 Homepage = "https://github.com/heepengpeng/hllm"

@@ -1,14 +1,14 @@
 {
   "executionEnvironments": [
     {
-      "root": "."
+      "root": ".",
+      "pythonPath": "/Users/hp/miniconda3/envs/hllm/bin/python"
     }
   ],
   "extraPaths": [
-    "/Users/hp/miniconda3/lib/python3.13/site-packages"
+    "/Users/hp/miniconda3/envs/hllm/lib/python3.11/site-packages"
   ],
-  "venvPath": "/Users/hp/miniconda3",
-  "pythonVersion": "3.13",
+  "pythonVersion": "3.11",
   "typeCheckingMode": "basic",
   "reportMissingImports": "none",
   "reportUnknownVariableType": "none",
