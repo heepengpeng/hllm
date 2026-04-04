@@ -6,9 +6,12 @@
 [![CI](https://github.com/heepengpeng/hllm/actions/workflows/ci.yml/badge.svg)](https://github.com/heepengpeng/hllm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-在 CPU 上运行的简化推理框架，支持 REST API 服务。
+在 CPU/GPU 上运行的简化推理框架，支持 REST API 服务。
 
-**🚀 Apple Silicon 优化**: 支持 MLX 后端，比 PyTorch MPS 快 2-5 倍
+**🚀 多平台优化**:
+- **NVIDIA GPU**: PyTorch CUDA 后端，RTX 3080 Ti 达 55+ tok/s
+- **Apple Silicon**: MLX 后端，比 PyTorch MPS 快 8+ 倍
+- **统一 API**: 同一套代码，自动选择最佳后端
 
 ## 快速开始
 
@@ -21,6 +24,30 @@ model = HLLM(model_path="microsoft/Phi-3-mini-4k-instruct")
 # 生成文本
 result = model.generate("Write a short story about a robot.")
 print(result)
+```
+
+### NVIDIA GPU 优化 (CUDA)
+
+在 NVIDIA GPU 上自动使用 CUDA 加速，支持模型自动下载：
+
+```bash
+# 安装 PyTorch CUDA 版本
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install light-llm-hp
+```
+
+```python
+from hllm import HLLM
+
+# 自动从 ModelScope/HuggingFace 下载模型
+model = HLLM(model_path="Llama-3.2-1B-Instruct", backend="pytorch", device="cuda")
+
+# 或使用完整模型 ID
+model = HLLM(model_path="TinyLlama/TinyLlama-1.1B-Chat-v1.0", device="cuda")
+
+# 查看后端信息
+print(model.get_info())
+# {'name': 'pytorch', 'device': 'cuda', ...}
 ```
 
 ### Apple Silicon 优化 (MLX)
@@ -48,17 +75,29 @@ print(model.get_info())
 
 ### 性能对比
 
-在 M1 MacBook Pro 上的典型性能 (Llama-3.2-1B, 100 tokens):
+**GPU 服务器** (RTX 3080 Ti, Llama-3.2-1B, 100 tokens):
+
+| 后端 | 首 token 延迟 | 吞吐量 | 显存占用 |
+|------|--------------|--------|----------|
+| PyTorch CUDA | **19ms** 🏆 | **55.1 tok/s** 🏆 | ~2.3GB |
+
+**Apple Silicon** (M1/M2/M3, Llama-3.2-1B, 100 tokens):
 
 | 后端 | 首 token 延迟 | 吞吐量 | 内存占用 |
 |------|--------------|--------|----------|
-| MLX | ~50ms | ~45 tok/s | ~800MB |
-| PyTorch MPS | ~150ms | ~15 tok/s | ~1200MB |
-| PyTorch CPU | ~500ms | ~5 tok/s | ~1200MB |
+| MLX | ~50ms | 32.5 tok/s | ~780MB |
+| PyTorch MPS | ~150ms | 3.8 tok/s | ~1GB |
+| PyTorch CPU | ~500ms | 1.6 tok/s | ~464MB |
+
+> 📊 详细报告: [docs/benchmark_report.md](docs/benchmark_report.md)
 
 运行基准测试：
 ```bash
+# Apple Silicon
 python examples/benchmark.py
+
+# GPU 服务器
+python benchmark_remote.py
 ```
 
 ## REST API 服务 (OpenAI 兼容)
@@ -72,7 +111,17 @@ pip install light-llm-hp[api]
 ### 启动服务
 
 ```bash
+# 使用本地模型
 python -m hllm.server --model ./TinyLlama-1.1B-Chat-v1.0 --port 8000
+
+# 自动下载模型 (从 ModelScope/HuggingFace)
+python -m hllm.server --model Llama-3.2-1B-Instruct --port 8000
+
+# GPU 服务器 (CUDA)
+python -m hllm.server --model Llama-3.2-1B-Instruct --device cuda
+
+# Apple Silicon (MLX)
+python -m hllm.server --model mlx-community/Llama-3.2-1B-Instruct-4bit --backend mlx
 ```
 
 ### 使用 OpenAI 官方客户端
