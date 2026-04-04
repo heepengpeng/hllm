@@ -8,6 +8,8 @@ on:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 允许创建 GitHub Release
 
     steps:
     - name: Checkout code
@@ -37,6 +39,7 @@ jobs:
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
+      if: success()  # 只有发布成功才创建 Release
       with:
         files: dist/*
         generate_release_notes: true
