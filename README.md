@@ -163,14 +163,132 @@ print(response.choices[0].message.content)
 
 ```
 hllm/
-├── hllm/              # 核心模块
+├── hllm/                   # 核心模块
 │   ├── __init__.py
-│   ├── model.py       # 模型加载与推理
-│   ├── tokenizer.py   # 分词器封装
-│   ├── generate.py    # 生成逻辑
-│   ├── server.py      # REST API 服务端
-│   └── client.py      # REST API 客户端
-├── tests/             # 测试
-├── examples/          # 示例
-└── docs/              # 文档
+│   ├── model.py            # 模型加载与推理
+│   ├── tokenizer.py        # 分词器封装
+│   ├── generate.py         # 生成逻辑
+│   ├── server.py           # REST API 服务端
+│   ├── client.py           # REST API 客户端
+│   ├── backends/           # 后端实现
+│   │   ├── base.py         # 后端基类
+│   │   ├── pytorch.py      # PyTorch CUDA/MPS/CPU
+│   │   ├── mlx.py          # Apple Silicon MLX
+│   │   └── paged_pytorch.py # PagedAttention 优化
+│   ├── paged_attention/    # PagedAttention 模块
+│   │   ├── block_manager.py   # 内存块管理
+│   │   ├── paged_attention.py # 注意力计算
+│   │   └── scheduler.py       # 请求调度
+│   └── utils/
+│       └── model_downloader.py # 模型下载工具
+├── tests/                  # 测试
+├── examples/               # 示例
+└── docs/                   # 文档
 ```
+
+---
+
+## ✅ 当前支持的特性
+
+### 多后端支持
+
+| 后端 | 设备 | 状态 | 性能 |
+|------|------|------|------|
+| **MLX** | Apple Silicon | ✅ 稳定 | 32.5 tok/s |
+| **PyTorch** | CUDA (NVIDIA) | ✅ 稳定 | 55.1 tok/s |
+| **PyTorch** | MPS (Apple) | ✅ 稳定 | 3.8 tok/s |
+| **PyTorch** | CPU | ✅ 稳定 | 1.6 tok/s |
+| **PagedAttention** | CUDA | ✅ 已发布 | **64.6 tok/s** 🏆 |
+
+### 核心功能
+
+- ✅ **自动后端选择**: 根据硬件自动选择最优后端
+- ✅ **模型自动下载**: 支持 ModelScope 和 HuggingFace 镜像
+- ✅ **REST API 服务**: OpenAI 兼容的 API 接口
+- ✅ **流式生成**: 支持 SSE 流式输出
+- ✅ **量化支持**: MLX 4-bit 量化
+- ✅ **PagedAttention**: vLLM 风格的内存优化
+- ✅ **连续批处理**: 动态批处理提升吞吐量
+- ✅ **Copy-on-Write**: 内存共享机制
+
+### 模型支持
+
+- ✅ Llama 系列 (1B, 3B, 7B+)
+- ✅ Phi-3 系列
+- ✅ TinyLlama
+- ✅ 其他 HuggingFace Transformers 模型
+
+### 开发工具
+
+- ✅ **Benchmark 工具**: 多平台性能测试
+- ✅ **覆盖率测试**: 72%+ 代码覆盖率
+- ✅ **CI/CD**: GitHub Actions 自动化
+- ✅ **类型检查**: Pyright 静态分析
+
+---
+
+## 🚀 Roadmap (后续规划)
+
+### Phase 1: 性能优化 (近期)
+
+- 🔄 **Prefix Caching**: 共享前缀的 KV cache 复用
+- 🔄 **Speculative Decoding**: 投机解码加速
+- 🔄 **Flash Attention 2**: 集成 FA2 进一步加速
+- 🔄 **CUDA Graph**: 捕获计算图减少 CPU 开销
+- 🔄 **INT8/FP8 量化**: 更低显存占用
+
+### Phase 2: 功能扩展 (中期)
+
+- 📋 **Function Calling**: OpenAI 风格的函数调用
+- 📋 **Vision Models**: 多模态模型支持 (Llava 等)
+- 📋 **Embedding API**: 文本嵌入接口
+- 📋 **LoRA Adapter**: 动态加载 LoRA 适配器
+- 📋 **Tensor Parallelism**: 多 GPU 张量并行
+
+### Phase 3: 生产就绪 (远期)
+
+- 📋 **Pipeline Parallelism**: 流水线并行
+- 📋 **Dynamic Batching**: 更智能的动态批处理
+- 📋 **Request Scheduling**: 优先级调度、QoS 保证
+- 📋 **Metrics & Monitoring**: Prometheus 指标导出
+- 📋 **Model Quantization**: GPTQ/AWQ 支持
+- 📋 **vLLM 兼容**: 与 vLLM API 完全兼容
+
+### Phase 4: 生态系统
+
+- 📋 **Docker 镜像**: 官方 Docker 部署方案
+- 📋 **K8s Operator**: Kubernetes 部署支持
+- 📋 **Model Hub**: 预优化模型仓库
+- 📋 **Chat UI**: 内置 Web 聊天界面
+- 📋 **Mobile SDK**: iOS/Android 推理 SDK
+
+---
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 PR！
+
+```bash
+# 克隆仓库
+git clone https://github.com/heepengpeng/hllm.git
+cd hllm
+
+# 安装开发依赖
+pip install -e ".[dev]"
+
+# 运行测试
+pytest tests/ -v
+
+# 运行基准测试
+python examples/benchmark.py
+```
+
+---
+
+## 📄 许可证
+
+MIT License - 详见 [LICENSE](LICENSE) 文件
+
+---
+
+*用 ❤️ 和 🤖 构建 - Vibe Coding 驱动开发*
