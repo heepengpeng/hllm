@@ -1,39 +1,57 @@
-"""MLX 后端实现 (Apple Silicon)"""
+"""MLX 后端实现 (Apple Silicon)
+
+专为 Apple Silicon (M1/M2/M3) 优化的推理后端，使用 MLX 框架。
+"""
 
 import logging
+import time
 from collections.abc import Generator
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from .base import BaseBackend
+from .base import BaseBackend, GenerationParams
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from mlx_lm.tokenizer_utils import TokenizerWrapper
-    from types import ModuleType
 
 
 class MLXBackend(BaseBackend):
     """MLX 推理后端 (专为 Apple Silicon 优化)
 
-    使用 mlx-lm 库进行高效推理
+    使用 mlx-lm 库进行高效推理，支持 Apple Silicon 的统一内存架构。
+    
+    Example:
+        >>> backend = MLXBackend("mlx-community/Llama-3.2-1B-Instruct-4bit")
+        >>> result = backend.generate("Hello, how are you?", max_new_tokens=50)
     """
 
     NAME = "mlx"
     SUPPORTS_QUANTIZATION = True
+    SUPPORTS_GPU = True  # Apple Silicon GPU
     DEFAULT_DEVICE = "mlx"
 
-    def __init__(
-        self,
-        model_path: str,
-        **kwargs
-    ):
+    def __init__(self, model_path: str, **kwargs):
+        """初始化 MLX 后端
+        
+        Args:
+            model_path: 模型路径或 HuggingFace model ID
+            **kwargs: 额外参数
+        """
         self._model = None
         self._tokenizer = None
         super().__init__(model_path, **kwargs)
 
     def _load_model(self, **kwargs) -> None:
-        """加载 MLX 模型"""
+        """加载 MLX 模型
+        
+        Args:
+            **kwargs: 加载参数
+            
+        Raises:
+            ImportError: 缺少 mlx 或 mlx-lm
+            RuntimeError: 模型加载失败
+        """
         try:
             from mlx_lm import load
         except ImportError as e:
@@ -51,72 +69,95 @@ class MLXBackend(BaseBackend):
 
         logger.info("MLX model loaded successfully")
 
-    def generate(
-        self,
-        prompt: str,
-        max_new_tokens: int = 128,
-        temperature: float = 1.0,
-        top_p: float = 1.0,
-        top_k: int = 50,
-        repetition_penalty: float = 1.0,
-        **kwargs
-    ) -> str:
-        """生成文本"""
-        from typing import cast
+    @property
+    def device_name(self) -> str:
+        """设备名称"""
+        return "mlx"
+
+    def _generate_impl(self, prompt: str, params: GenerationParams, **kwargs) -> str:
+        """生成实现
+        
+        Args:
+            prompt: 输入提示
+            params: 生成参数
+            **kwargs: 额外参数
+            
+        Returns:
+            生成的文本
+        """
         from mlx_lm import generate as mlx_generate
         from mlx_lm.sample_utils import make_sampler
 
         if self._model is None or self._tokenizer is None:
-            raise RuntimeError("Model not loaded. Call _load_model() first.")
+            raise RuntimeError("Model not loaded")
 
-        logger.info(f"MLX generating with max_tokens={max_new_tokens}")
+        # 计算统计
+        start_time = time.time()
+        prompt_tokens = len(self._tokenizer.encode(prompt))
 
         # 构建采样器
         # mlx_lm 使用 temp=0 表示 greedy，而不是 temperature=1.0
-        temp = 0.0 if temperature <= 0.1 else temperature
-        sampler = make_sampler(temp=temp, top_p=top_p if top_p < 1.0 else 0.0)
+        temp = 0.0 if params.temperature <= 0.1 else params.temperature
+        sampler = make_sampler(
+            temp=temp, 
+            top_p=params.top_p if params.top_p < 1.0 else 0.0
+        )
 
         response = mlx_generate(
             self._model,
             self._tokenizer,
             prompt=prompt,
-            max_tokens=max_new_tokens,
+            max_tokens=params.max_new_tokens,
             sampler=sampler,
             verbose=False,
         )
+        
+        # 更新统计
+        generated_tokens = len(self._tokenizer.encode(response))
+        latency_ms = (time.time() - start_time) * 1000
+        self._stats.update(prompt_tokens, generated_tokens, latency_ms)
 
         return response
 
-    def stream_generate(
-        self,
-        prompt: str,
-        max_new_tokens: int = 128,
-        temperature: float = 1.0,
-        top_p: float = 1.0,
-        top_k: int = 50,
-        repetition_penalty: float = 1.0,
+    def _stream_generate_impl(
+        self, 
+        prompt: str, 
+        params: GenerationParams, 
         **kwargs
     ) -> Generator[str, None, None]:
-        """流式生成文本"""
-        from typing import cast
+        """流式生成实现
+        
+        Args:
+            prompt: 输入提示
+            params: 生成参数
+            **kwargs: 额外参数
+            
+        Yields:
+            逐个 token
+        """
         from mlx_lm import stream_generate as mlx_stream_generate
         from mlx_lm.sample_utils import make_sampler
 
         if self._model is None or self._tokenizer is None:
-            raise RuntimeError("Model not loaded. Call _load_model() first.")
+            raise RuntimeError("Model not loaded")
 
-        logger.info(f"MLX streaming generation with max_tokens={max_new_tokens}")
+        start_time = time.time()
+        prompt_tokens = len(self._tokenizer.encode(prompt))
 
         # 构建采样器
-        temp = 0.0 if temperature <= 0.1 else temperature
-        sampler = make_sampler(temp=temp, top_p=top_p if top_p < 1.0 else 0.0)
+        temp = 0.0 if params.temperature <= 0.1 else params.temperature
+        sampler = make_sampler(
+            temp=temp, 
+            top_p=params.top_p if params.top_p < 1.0 else 0.0
+        )
 
-        # mlx_lm.stream_generate 返回 GenerationResponse 对象
+        # 流式生成
+        generated_tokens = 0
         for response in mlx_stream_generate(
             self._model,
             self._tokenizer,
             prompt=prompt,
-            max_tokens=max_new_tokens,
+            max_tokens=params.max_new_tokens,
             sampler=sampler,
         ):
             # GenerationResponse 有 text 属性
@@ -124,38 +165,72 @@ class MLXBackend(BaseBackend):
                 yield response.text
             else:
                 yield str(response)
-
-    @property
-    def device_name(self) -> str:
-        return "mlx"
+            generated_tokens += 1
+        
+        # 更新统计
+        latency_ms = (time.time() - start_time) * 1000
+        self._stats.update(prompt_tokens, generated_tokens, latency_ms)
 
     @property
     def eos_token_id(self) -> int | None:
-        from typing import cast
+        """结束 token ID"""
         if self._tokenizer:
             eos_id = getattr(self._tokenizer, 'eos_token_id', None)
             if eos_id is not None and isinstance(eos_id, int):
-                return cast(int, eos_id)
+                return eos_id
         return None
 
     @property
     def pad_token_id(self) -> int | None:
-        # MLX tokenizer 可能没有 pad_token_id
-        from typing import cast
+        """填充 token ID"""
         if self._tokenizer:
             pad_id = getattr(self._tokenizer, 'pad_token_id', None)
             if pad_id is not None and isinstance(pad_id, int):
-                return cast(int, pad_id)
+                return pad_id
+            # 如果没有 pad_token，使用 eos_token
+            return self.eos_token_id
+        return None
+
+    @property
+    def vocab_size(self) -> int | None:
+        """词汇表大小"""
+        if self._tokenizer:
+            return len(self._tokenizer)
         return None
 
     @property
     def tokenizer(self):
-        """返回分词器"""
+        """分词器"""
         return self._tokenizer
 
     @property
     def config(self):
-        """获取模型配置"""
+        """模型配置"""
         if self._model and hasattr(self._model, 'config'):
             return self._model.config
         return None
+
+    def get_memory_usage(self) -> dict[str, float]:
+        """获取内存使用情况
+        
+        Returns:
+            内存使用信息
+        """
+        # MLX 使用统一内存，无法精确区分 CPU/GPU
+        import psutil
+        process = psutil.Process()
+        
+        return {
+            "device": "mlx",
+            "rss_mb": process.memory_info().rss / 1024 / 1024,
+            "note": "MLX uses unified memory architecture"
+        }
+
+    def cleanup(self) -> None:
+        """清理资源"""
+        super().cleanup()
+        
+        del self._model
+        del self._tokenizer
+        
+        logger.info("MLX backend cleaned up")
