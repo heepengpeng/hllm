@@ -70,6 +70,28 @@ def list_backends() -> list[str]:
     return list(_BACKENDS.keys())
 
 
+def get_backend_info() -> dict[str, dict]:
+    """获取所有可用后端的信息
+    
+    Returns:
+        后端信息字典，键为后端名称，值为后端属性
+        
+    Example:
+        >>> info = get_backend_info()
+        >>> print(info["pytorch"]["available"])
+        True
+    """
+    info = {}
+    for name, backend_class in _BACKENDS.items():
+        info[name] = {
+            "available": True,
+            "supports_quantization": getattr(backend_class, 'SUPPORTS_QUANTIZATION', False),
+            "supports_gpu": getattr(backend_class, 'SUPPORTS_GPU', False),
+            "default_device": getattr(backend_class, 'DEFAULT_DEVICE', 'cpu'),
+        }
+    return info
+
+
 def get_backend_class(name: str) -> Type[BaseBackend]:
     """获取后端类
     
@@ -127,26 +149,29 @@ def create_backend(
     return backend_class(model_path=model_path, **kwargs)
 
 
-def auto_select_backend(device: str | None = None) -> str:
+def auto_select_backend(model_path: str | None = None, device: str | None = None) -> tuple[str, dict]:
     """自动选择最佳后端
     
     根据当前硬件环境自动选择最优后端。
     
     Args:
+        model_path: 模型路径
         device: 指定设备 (可选)，如 cuda/mps/cpu
         
     Returns:
-        推荐的后端名称
+        (backend_name, kwargs) 元组
         
     Example:
-        >>> backend_name = auto_select_backend()
+        >>> backend_name, kwargs = auto_select_backend("model-path")
         >>> print(backend_name)  # 'mlx' 或 'pytorch'
     """
+    kwargs = {"model_path": model_path} if model_path else {}
+    
     # 优先检查 MLX (Apple Silicon)
     try:
         import mlx.core as mx
         if device is None or device == "mlx":
-            return "mlx"
+            return "mlx", kwargs
     except ImportError:
         pass
     
@@ -157,9 +182,9 @@ def auto_select_backend(device: str | None = None) -> str:
             # 检查是否有 PagedAttention
             if "paged_pytorch" in list_backends():
                 if device is None or device == "cuda":
-                    return "paged_pytorch"
+                    return "paged_pytorch", kwargs
             if device is None or device in ("cuda", "auto"):
-                return "pytorch"
+                return "pytorch", kwargs
     except ImportError:
         pass
     
@@ -168,12 +193,12 @@ def auto_select_backend(device: str | None = None) -> str:
         import torch
         if torch.backends.mps.is_available():
             if device is None or device in ("mps", "auto"):
-                return "pytorch"
+                return "pytorch", kwargs
     except ImportError:
         pass
     
     # 默认使用 PyTorch CPU
-    return "pytorch"
+    return "pytorch", kwargs
 
 
 # 延迟导入和注册后端
@@ -212,14 +237,15 @@ __all__ = [
     "GenerationParams",
     "BackendStats",
     "TokenizerProtocol",
-    
+
     # 函数
     "create_backend",
     "list_backends",
     "get_backend_class",
+    "get_backend_info",
     "auto_select_backend",
     "register_backend",
-    
+
     # 后端类 (如果已安装)
     "PyTorchBackend",
     "MLXBackend",

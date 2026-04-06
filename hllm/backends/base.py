@@ -223,7 +223,22 @@ class BaseBackend(ABC):
         )
         params.validate()
         
-        return self._generate_impl(prompt, params, **kwargs)
+        # 记录开始时间
+        import time
+        start_time = time.perf_counter()
+        
+        # 估算 prompt tokens
+        prompt_tokens = len(prompt) // 4  # 粗略估算
+        
+        # 执行生成
+        result = self._generate_impl(prompt, params, **kwargs)
+        
+        # 更新统计
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        generated_tokens = len(result) // 4  # 粗略估算
+        self._stats.update(prompt_tokens, generated_tokens, latency_ms)
+        
+        return result
     
     @abstractmethod
     def _generate_impl(self, prompt: str, params: GenerationParams, **kwargs) -> str:
@@ -283,7 +298,19 @@ class BaseBackend(ABC):
         )
         params.validate()
         
-        yield from self._stream_generate_impl(prompt, params, **kwargs)
+        # 记录开始时间
+        import time
+        start_time = time.perf_counter()
+        prompt_tokens = len(prompt) // 4
+        
+        generated_tokens = 0
+        for token in self._stream_generate_impl(prompt, params, **kwargs):
+            generated_tokens += 1
+            yield token
+        
+        # 更新统计
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        self._stats.update(prompt_tokens, generated_tokens, latency_ms)
     
     @abstractmethod
     def _stream_generate_impl(
