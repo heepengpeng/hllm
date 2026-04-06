@@ -205,19 +205,11 @@ class TestBackendRegistry:
         register_backend("mock_test", MockBackend)
         assert "mock_test" in list_backends()
 
-        # 清理
-        from hllm.backends import _BACKENDS
-        del _BACKENDS["mock_test"]
-
     def test_register_duplicate(self):
         """测试重复注册"""
         register_backend("mock_dup", MockBackend)
         with pytest.raises(ValueError, match="already registered"):
             register_backend("mock_dup", MockBackend)
-
-        # 清理
-        from hllm.backends import _BACKENDS
-        del _BACKENDS["mock_dup"]
 
     def test_get_backend_class(self):
         """测试获取后端类"""
@@ -232,13 +224,14 @@ class TestBackendRegistry:
 
     def test_auto_select_backend(self):
         """测试自动选择后端"""
-        backend = auto_select_backend()
-        assert isinstance(backend, str)
-        assert backend in list_backends()
+        backend_name, kwargs = auto_select_backend("test-model")
+        assert isinstance(backend_name, str)
+        assert backend_name in list_backends()
+        assert kwargs.get("model_path") == "test-model"
 
         # 测试指定设备
-        backend_cpu = auto_select_backend("cpu")
-        assert backend_cpu in list_backends()
+        backend_name, kwargs = auto_select_backend("test-model", device="cpu")
+        assert backend_name in list_backends()
 
 
 @pytest.mark.skipif(
