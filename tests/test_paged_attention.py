@@ -257,3 +257,82 @@ class TestPagedAttentionModule:
         assert "PagedAttention" in __all__
         assert "BlockManager" in __all__
         assert "Scheduler" in __all__
+
+
+class TestFlashAttention:
+    """测试 Flash Attention 功能"""
+
+    def test_check_flash_attn_available_function_exists(self):
+        """测试 _check_flash_attn_available 函数存在"""
+        from hllm.paged_attention.paged_attention import _check_flash_attn_available
+        assert callable(_check_flash_attn_available)
+
+    def test_check_flash_attn_returns_bool(self):
+        """测试 _check_flash_attn_available 返回布尔值"""
+        from hllm.paged_attention.paged_attention import _check_flash_attn_available
+        result = _check_flash_attn_available()
+        assert isinstance(result, bool)
+
+    def test_paged_attention_module_exports_check_function(self):
+        """测试 paged_attention 模块导出检测函数"""
+        from hllm.paged_attention import _check_flash_attn_available
+        assert callable(_check_flash_attn_available)
+
+    def test_backends_module_exports_check_functions(self):
+        """测试 backends 模块导出检测函数"""
+        from hllm.backends import (
+            _check_flash_attn_available,
+            _check_xformers_available,
+            _get_best_attention_impl
+        )
+        assert callable(_check_flash_attn_available)
+        assert callable(_check_xformers_available)
+        assert callable(_get_best_attention_impl)
+
+    def test_paged_attention_has_flash_attention_method(self):
+        """测试 PagedAttention 有 _flash_attention 方法"""
+        from hllm.paged_attention.paged_attention import PagedAttention
+        assert hasattr(PagedAttention, '_flash_attention')
+
+    def test_paged_attention_flash_attn_disabled_by_default(self):
+        """测试 PagedAttention 默认禁用 Flash Attention (当不可用时)"""
+        from hllm.paged_attention.paged_attention import PagedAttention, _check_flash_attn_available
+
+        pa = PagedAttention(use_flash_attn=True)  # 尝试启用
+        if not _check_flash_attn_available():
+            # 如果不可用，应该 fallback 到 False
+            assert pa.use_flash_attn == False
+
+    def test_paged_attention_use_flash_attn_param(self):
+        """测试 PagedAttention use_flash_attn 参数"""
+        from hllm.paged_attention.paged_attention import PagedAttention
+
+        pa1 = PagedAttention(use_flash_attn=True)
+        pa2 = PagedAttention(use_flash_attn=False)
+
+        # 参数应该被接受
+        assert pa1.use_flash_attn == False  # 因为没有安装 flash_attn
+        assert pa2.use_flash_attn == False
+
+
+class TestBackendsFlashAttention:
+    """测试 backends 模块的 Flash Attention 功能"""
+
+    def test_check_flash_attn_available_in_backends(self):
+        """测试 backends 模块的 Flash Attention 检测"""
+        from hllm.backends import _check_flash_attn_available
+        result = _check_flash_attn_available()
+        assert isinstance(result, bool)
+
+    def test_check_xformers_available_in_backends(self):
+        """测试 backends 模块的 xFormers 检测"""
+        from hllm.backends import _check_xformers_available
+        result = _check_xformers_available()
+        assert isinstance(result, bool)
+
+    def test_get_best_attention_impl(self):
+        """测试获取最佳 attention 实现"""
+        from hllm.backends import _get_best_attention_impl
+        result = _get_best_attention_impl()
+        # 应该返回 None, "flash_attention_2", 或 "sdpa"
+        assert result is None or result in ("flash_attention_2", "sdpa")

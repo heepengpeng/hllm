@@ -4,7 +4,7 @@
 """
 
 from .block_manager import BlockManager
-from .paged_attention import PagedAttention
+from .paged_attention import PagedAttention, _check_flash_attn_available
 from .scheduler import Scheduler
 
-__all__ = ["BlockManager", "PagedAttention", "Scheduler"]
+__all__ = ["BlockManager", "PagedAttention", "Scheduler", "_check_flash_attn_available"]

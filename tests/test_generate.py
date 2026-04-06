@@ -163,6 +163,78 @@ class TestGenerateWithMocks:
         tokens = list(stream_generate(mock_model, mock_tokenizer, "test", max_new_tokens=3, device="cpu"))
         assert isinstance(tokens, list)
 
+    def test_generate_with_repetition_penalty(self, mock_tokenizer, mock_model):
+        """测试 generate 使用重复惩罚"""
+        from hllm.generate import generate
+
+        result = generate(
+            mock_model, mock_tokenizer, "test",
+            max_new_tokens=10,
+            repetition_penalty=1.5,  # != 1.0
+            device="cpu"
+        )
+        assert result is not None
+
+    def test_generate_with_temperature(self, mock_tokenizer, mock_model):
+        """测试 generate 使用温度"""
+        from hllm.generate import generate
+
+        result = generate(
+            mock_model, mock_tokenizer, "test",
+            max_new_tokens=10,
+            temperature=0.8,  # != 1.0
+            device="cpu"
+        )
+        assert result is not None
+
+    def test_generate_with_top_k(self, mock_tokenizer, mock_model):
+        """测试 generate 使用 top-k"""
+        from hllm.generate import generate
+
+        result = generate(
+            mock_model, mock_tokenizer, "test",
+            max_new_tokens=10,
+            top_k=20,  # > 0
+            device="cpu"
+        )
+        assert result is not None
+
+    def test_generate_with_top_p(self, mock_tokenizer, mock_model):
+        """测试 generate 使用 top-p"""
+        from hllm.generate import generate
+
+        result = generate(
+            mock_model, mock_tokenizer, "test",
+            max_new_tokens=10,
+            top_p=0.9,  # < 1.0
+            device="cpu"
+        )
+        assert result is not None
+
+    def test_stream_generate_with_repetition_penalty(self, mock_tokenizer, mock_model):
+        """测试流式生成使用重复惩罚"""
+        from hllm.generate import stream_generate
+
+        tokens = list(stream_generate(
+            mock_model, mock_tokenizer, "test",
+            max_new_tokens=5,
+            repetition_penalty=1.5,
+            device="cpu"
+        ))
+        assert isinstance(tokens, list)
+
+    def test_stream_generate_with_temperature(self, mock_tokenizer, mock_model):
+        """测试流式生成使用温度"""
+        from hllm.generate import stream_generate
+
+        tokens = list(stream_generate(
+            mock_model, mock_tokenizer, "test",
+            max_new_tokens=5,
+            temperature=0.7,
+            device="cpu"
+        ))
+        assert isinstance(tokens, list)
+
 
 class TestGenerateModuleExports:
     """测试模块导出"""

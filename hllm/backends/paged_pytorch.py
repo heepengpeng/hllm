@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Optional
 
 import torch
 
-from .pytorch import PyTorchBackend
+from .pytorch import PyTorchBackend, _check_flash_attn_available
 from ..paged_attention import BlockManager, PagedAttention, Scheduler
 
 if TYPE_CHECKING:
@@ -51,9 +51,14 @@ class PagedPyTorchBackend(PyTorchBackend):
         max_batch_size: int = 16,
         torch_dtype: torch.dtype | None = None,
         trust_remote_code: bool = True,
+        use_flash_attn: bool | None = None,
         **kwargs
     ):
-        """初始化 PagedAttention 后端"""
+        """初始化 PagedAttention 后端
+        
+        Args:
+            use_flash_attn: 是否使用 Flash Attention 2 (None=自动检测)
+        """
         self.block_size = block_size
         self.max_batch_size = max_batch_size
 
@@ -63,6 +68,7 @@ class PagedPyTorchBackend(PyTorchBackend):
             device=device,
             torch_dtype=torch_dtype,
             trust_remote_code=trust_remote_code,
+            use_flash_attn=use_flash_attn,
             **kwargs
         )
 
@@ -121,12 +127,18 @@ class PagedPyTorchBackend(PyTorchBackend):
         num_kv_heads = getattr(config, 'num_key_value_heads', num_heads // 4)
         head_dim = getattr(config, 'head_dim', config.hidden_size // num_heads)
         
+        # 检查 Flash Attention 是否可用
+        use_flash = _check_flash_attn_available()
+        if use_flash:
+            logger.info("Flash Attention 2 available, enabling for PagedAttention")
+        
         self.paged_attention = PagedAttention(
             num_heads=num_heads,
             num_kv_heads=num_kv_heads,
             head_dim=head_dim,
             block_size=self.block_size,
-            use_flash_attn=False  # 简化实现，暂不使用 flash attn
+            use_flash_attn=use_flash,
+            torch_module=self._torch if hasattr(self, '_torch') else None,
         )
         
         # 更新 BlockManager 的维度
@@ -271,6 +283,7 @@ class PagedPyTorchBackend(PyTorchBackend):
             "block_size": self.block_size,
             "num_blocks": self.block_manager.num_blocks if hasattr(self.block_manager, 'num_blocks') else None,
             "max_batch_size": self.max_batch_size,
+            "flash_attention": self.use_flash_attn,
         }
         return info
 

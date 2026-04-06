@@ -72,23 +72,50 @@ class TestBaseBackendGetInfo(unittest.TestCase):
         """测试 get_info 返回结构"""
         from hllm.backends.pytorch import PyTorchBackend
 
-        with patch.object(PyTorchBackend, '_load_model'):
-            with patch('hllm.backends.pytorch.AutoTokenizer') as mock_tok, \
-                 patch('hllm.backends.pytorch.AutoModelForCausalLM') as mock_model:
+        # 创建 mock 模块注入
+        mock_torch = Mock()
+        mock_torch.float32 = "float32"
+        mock_torch.zeros = Mock(return_value=Mock())
+        mock_torch.no_grad = Mock(return_value=Mock())
+        mock_torch.cuda = Mock()
+        mock_torch.cuda.is_available = Mock(return_value=False)
+        mock_torch.cuda.empty_cache = Mock()
+        mock_torch.cuda.synchronize = Mock()
+        mock_torch.backends = Mock()
+        mock_torch.backends.mps = Mock()
+        mock_torch.backends.mps.is_available = Mock(return_value=False)
+        mock_torch.compile = None
 
-                mock_tok.from_pretrained.return_value = Mock(eos_token_id=2, pad_token_id=0)
-                mock_m = Mock()
-                mock_m.config = Mock()
-                mock_m.to.return_value = mock_m
-                mock_model.from_pretrained.return_value = mock_m
+        mock_transformers = Mock()
+        mock_tokenizer = Mock()
+        mock_tokenizer.pad_token = "PAD"
+        mock_tokenizer.eos_token_id = 2
+        mock_tokenizer.encode = Mock(return_value=[1, 2, 3])
+        mock_tokenizer.__len__ = Mock(return_value=32000)
+        mock_tokenizer.pad_token_id = 0
+        mock_transformers.AutoTokenizer.from_pretrained.return_value = mock_tokenizer
 
-                backend = PyTorchBackend("test-model", device="cpu")
-                info = backend.get_info()
+        mock_model = Mock()
+        mock_model.to.return_value = mock_model
+        mock_model.eval = Mock()
+        mock_model.config = Mock()
+        mock_transformers.AutoModelForCausalLM.from_pretrained.return_value = mock_model
 
-                self.assertIn("name", info)
-                self.assertIn("device", info)
-                self.assertIn("model_path", info)
-                self.assertIn("supports_quantization", info)
+        mock_ensure = Mock(return_value="/mock/path")
+
+        backend = PyTorchBackend(
+            "test-model",
+            device="cpu",
+            torch_module=mock_torch,
+            transformers_module=mock_transformers,
+            ensure_model_fn=mock_ensure,
+        )
+        info = backend.get_info()
+
+        self.assertIn("name", info)
+        self.assertIn("device", info)
+        self.assertIn("model_path", info)
+        self.assertIn("supports_quantization", info)
 
 
 if __name__ == "__main__":

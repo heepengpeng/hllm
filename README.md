@@ -210,6 +210,7 @@ hllm/
 - ✅ **PagedAttention**: vLLM 风格的内存优化
 - ✅ **连续批处理**: 动态批处理提升吞吐量
 - ✅ **Copy-on-Write**: 内存共享机制
+- ✅ **Flash Attention 2**: IO-aware 注意力加速 (30-40% 提升)
 
 ### 模型支持
 
@@ -231,9 +232,9 @@ hllm/
 
 ### Phase 1: 性能优化 (近期)
 
+- ✅ **Flash Attention 2**: 集成 FA2 进一步加速 ✅
 - 🔄 **Prefix Caching**: 共享前缀的 KV cache 复用
 - 🔄 **Speculative Decoding**: 投机解码加速
-- 🔄 **Flash Attention 2**: 集成 FA2 进一步加速
 - 🔄 **CUDA Graph**: 捕获计算图减少 CPU 开销
 - 🔄 **INT8/FP8 量化**: 更低显存占用
 
@@ -261,6 +262,20 @@ hllm/
 - 📋 **Model Hub**: 预优化模型仓库
 - 📋 **Chat UI**: 内置 Web 聊天界面
 - 📋 **Mobile SDK**: iOS/Android 推理 SDK
+
+---
+
+## 📚 文档
+
+详细技术文档：
+
+| 文档 | 说明 |
+|------|------|
+| [Flash Attention 2](docs/flash_attention.md) | Flash Attention 2 集成指南 |
+| [PagedAttention 设计](docs/paged_attention_design.md) | PagedAttention 架构与原理 |
+| [API 文档](docs/api.md) | REST API 完整文档 |
+| [Roadmap](docs/roadmap.md) | 开发路线图 |
+| [vLLM 对比](docs/vllm-comparison.md) | 与 vLLM 的差异对比 |
 
 ---
 

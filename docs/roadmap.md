@@ -31,8 +31,10 @@
 **目标**: 单卡性能提升 50%
 
 #### Features
-- [ ] **Flash Attention 2** 集成
+- [x] **Flash Attention 2** 集成 ✅
   - 使用 xFormers 或 FlashAttention 库
+  - 自动检测并启用 Flash Attention 2
+  - 支持 transformers attn_implementation="flash_attention_2"
   - 预期提升: 30-40% 吞吐量
   - 工作量: 3-5 天
 
@@ -220,7 +222,7 @@
 
 ### v0.2.0 检查清单
 - [ ] RTX 3080 Ti 达到 90+ tok/s
-- [ ] Flash Attention 2 集成完成
+- [x] Flash Attention 2 集成完成 ✅
 - [ ] Prefix Caching 可用
 - [ ] GPTQ 模型可加载
 

@@ -100,7 +100,7 @@ class PagedAttention:
 
         # 计算 attention
         if self.use_flash_attn:
-            output = self._flash_attention(query, key, value)
+            output = self._flash_attention(query, key, value, causal=True)
         else:
             output = self._standard_attention(query, key, value, seq_lengths)
 
@@ -173,22 +173,66 @@ class PagedAttention:
         self,
         query: Any,
         key: Any,
-        value: Any
+        value: Any,
+        causal: bool = True
     ) -> Any:
-        """使用 Flash Attention"""
+        """使用 Flash Attention 2
+        
+        Args:
+            query: [batch, num_heads, head_dim]
+            key: [batch, seq_len, num_kv_heads, head_dim]
+            value: [batch, seq_len, num_kv_heads, head_dim]
+            causal: 是否使用 causal mask
+            
+        Returns:
+            output: [batch, num_heads, head_dim]
+        """
+        torch = self._torch
+        
+        batch_size, num_heads, head_dim = query.shape
+        seq_len = key.shape[1]
+        num_kv_heads = key.shape[2]
+        
+        # 处理 GQA: 重复 KV heads 以匹配 Q heads
+        if num_heads != num_kv_heads:
+            num_repeat = num_heads // num_kv_heads
+            # key: [batch, seq_len, num_kv_heads, head_dim] -> [batch, seq_len, num_heads, head_dim]
+            key = key.unsqueeze(2).expand(batch_size, seq_len, num_repeat, num_kv_heads, head_dim)
+            key = key.reshape(batch_size, seq_len, num_heads, head_dim)
+            # value: [batch, seq_len, num_kv_heads, head_dim] -> [batch, seq_len, num_heads, head_dim]
+            value = value.unsqueeze(2).expand(batch_size, seq_len, num_repeat, num_kv_heads, head_dim)
+            value = value.reshape(batch_size, seq_len, num_heads, head_dim)
+        
+        # Flash Attention 格式: [batch, seqlen, num_heads, head_dim]
+        # 当前格式: query=[batch, num_heads, head_dim], key/value=[batch, seqlen, num_heads, head_dim]
+        # 需要扩展 query: [batch, 1, num_heads, head_dim]
+        q = query.unsqueeze(1)  # [batch, 1, num_heads, head_dim]
+        
         try:
             from flash_attn import flash_attn_func
-            # query: [batch, heads, dim] -> [batch, 1, heads, dim]
-            q = query.unsqueeze(1)
-            k = key.unsqueeze(1)
-            v = value.unsqueeze(1)
-
-            # Flash attention 需要 [batch, seqlen, heads, dim]
-            out = flash_attn_func(q, k, v, softmax_scale=self.scale, causal=True)
-            return out.squeeze(1)  # [batch, heads, dim]
-        except Exception as e:
-            logger.warning(f"Flash attention failed: {e}, falling back to standard")
-            return self._standard_attention(query, key, value, None)
+            # Flash Attention 2
+            out = flash_attn_func(
+                q, key, value,
+                causal=causal,
+                softmax_scale=self.scale,
+                dropout_p=0.0,
+                head_first=True  # HLLM 使用 head_first 布局
+            )
+            # 输出: [batch, 1, num_heads, head_dim] -> [batch, num_heads, head_dim]
+            return out.squeeze(1)
+        except (ImportError, TypeError):
+            # 尝试 fallback 到不同参数顺序
+            try:
+                from flash_attn import flash_attn_func
+                out = flash_attn_func(
+                    q, key, value,
+                    softmax_scale=self.scale,
+                    causal=causal
+                )
+                return out.squeeze(1)
+            except Exception as e:
+                logger.warning(f"Flash attention failed: {e}, falling back to standard")
+                return self._standard_attention(query, key, value, None)
 
     def _standard_attention(
         self,

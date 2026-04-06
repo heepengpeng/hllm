@@ -245,6 +245,9 @@ __all__ = [
     "get_backend_info",
     "auto_select_backend",
     "register_backend",
+    "_check_flash_attn_available",
+    "_check_xformers_available",
+    "_get_best_attention_impl",
 
     # 后端类 (如果已安装)
     "PyTorchBackend",
@@ -265,5 +268,11 @@ except ImportError:
 
 try:
     from .paged_pytorch import PagedPyTorchBackend
+except ImportError:
+    pass
+
+# Flash Attention 检测函数导出
+try:
+    from .pytorch import _check_flash_attn_available, _check_xformers_available, _get_best_attention_impl
 except ImportError:
     pass

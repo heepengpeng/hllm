@@ -3,18 +3,67 @@
 import logging
 import time
 from collections.abc import Generator
-from typing import TYPE_CHECKING
-
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from typing import Any, Callable, TYPE_CHECKING
 
 from .base import BaseBackend, GenerationParams
-from ..utils.model_downloader import ensure_model
 
 if TYPE_CHECKING:
+    import torch
     from transformers import PreTrainedModel, PreTrainedTokenizer
 
 logger = logging.getLogger(__name__)
+
+
+def _get_torch():
+    """获取 torch 模块（延迟导入）"""
+    import torch
+    return torch
+
+
+def _check_flash_attn_available() -> bool:
+    """检查 Flash Attention 是否可用
+    
+    Returns:
+        True 如果 flash_attn 包已安装
+    """
+    try:
+        from flash_attn import flash_attn_func
+        return True
+    except ImportError:
+        return False
+
+
+def _check_xformers_available() -> bool:
+    """检查 xFormers 是否可用
+    
+    Returns:
+        True 如果 xformers 包已安装
+    """
+    try:
+        import xformers
+        return True
+    except ImportError:
+        return False
+
+
+def _get_best_attention_impl() -> str | None:
+    """获取最佳 attention 实现方式
+    
+    Returns:
+        "flash_attention_2", "sdpa", 或 None (使用默认)
+    """
+    if _check_flash_attn_available():
+        return "flash_attention_2"
+    elif hasattr(_get_torch(), '.nn.multihead_attention'):
+        # 检查 PyTorch 是否有 SDPA
+        try:
+            from packaging import version
+            torch_version = _get_torch().__version__
+            if version.parse(torch_version) >= version.parse("2.0.0"):
+                return "sdpa"
+        except Exception:
+            pass
+    return None
 
 
 class PyTorchBackend(BaseBackend):
@@ -36,8 +85,14 @@ class PyTorchBackend(BaseBackend):
         self,
         model_path: str,
         device: str = "cpu",
-        torch_dtype: torch.dtype | None = None,
+        torch_dtype: Any = None,
         trust_remote_code: bool = True,
+        # Attention 实现选项
+        use_flash_attn: bool | None = None,
+        # 依赖注入参数（用于测试）
+        torch_module: Any = None,
+        transformers_module: Any = None,
+        ensure_model_fn: Callable[[str, Any], str] | None = None,
         **kwargs
     ):
         """初始化 PyTorch 后端
@@ -47,11 +102,38 @@ class PyTorchBackend(BaseBackend):
             device: 计算设备 (cpu/cuda/mps)
             torch_dtype: PyTorch 数据类型
             trust_remote_code: 是否信任远程代码
+            use_flash_attn: 是否使用 Flash Attention 2 (None=自动检测)
+            torch_module: torch 模块注入（用于测试）
+            transformers_module: transformers 模块注入（用于测试）
+            ensure_model_fn: 模型路径解析函数注入（用于测试）
             **kwargs: 额外参数
         """
+        # 延迟初始化 torch_module
+        if torch_module is None:
+            torch_module = _get_torch()
+        
+        self._torch = torch_module
+        self._transformers = transformers_module
+        self._ensure_model_fn = ensure_model_fn
+        
         self._device_name = self._normalize_device(device)
-        self.torch_dtype = torch_dtype or torch.float32
+        
+        # 处理 torch_dtype
+        if torch_dtype is None:
+            torch_dtype = self._torch.float32
+        self.torch_dtype = torch_dtype
+        
         self.trust_remote_code = trust_remote_code
+        
+        # Flash Attention 配置
+        if use_flash_attn is None:
+            self.use_flash_attn = _check_flash_attn_available()
+        else:
+            self.use_flash_attn = use_flash_attn and _check_flash_attn_available()
+        
+        if self.use_flash_attn:
+            logger.info("Flash Attention 2 is available and enabled")
+        
         super().__init__(model_path, **kwargs)
 
     def _normalize_device(self, device: str) -> str:
@@ -64,6 +146,7 @@ class PyTorchBackend(BaseBackend):
             标准化后的设备名称
         """
         device = device.lower()
+        torch = self._torch
         
         if device == "mps":
             if not torch.backends.mps.is_available():
@@ -95,9 +178,15 @@ class PyTorchBackend(BaseBackend):
                 - quantization_config: 量化配置
                 - attn_implementation: 注意力实现方式
                 - compile: 是否使用 torch.compile
+                - use_modelscope: 是否使用 ModelScope
+                - use_hf_mirror: 是否使用 HF 镜像
+                - prefer_modelscope: 优先使用 ModelScope
         """
-        # 自动下载模型（如果不是本地路径）
-        model_path = ensure_model(
+        from ..utils.model_downloader import ensure_model as _default_ensure_model
+        
+        # 模型路径解析（支持注入）
+        ensure_fn = self._ensure_model_fn or _default_ensure_model
+        model_path = ensure_fn(
             self.model_path,
             use_modelscope=kwargs.get("use_modelscope", True),
             use_hf_mirror=kwargs.get("use_hf_mirror", True),
@@ -106,8 +195,17 @@ class PyTorchBackend(BaseBackend):
         
         logger.info(f"Loading PyTorch model from {model_path} on {self.device_name}")
 
+        # transformers 加载（支持注入）
+        if self._transformers is None:
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            AutoModelForCausalLM_ = AutoModelForCausalLM
+            AutoTokenizer_ = AutoTokenizer
+        else:
+            AutoModelForCausalLM_ = self._transformers.AutoModelForCausalLM
+            AutoTokenizer_ = self._transformers.AutoTokenizer
+        
         # 加载分词器
-        self._tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
+        self._tokenizer: "PreTrainedTokenizer" = AutoTokenizer_.from_pretrained(
             model_path,
             trust_remote_code=self.trust_remote_code,
         )
@@ -126,10 +224,16 @@ class PyTorchBackend(BaseBackend):
         # 支持量化配置
         if "quantization_config" in kwargs:
             load_kwargs["quantization_config"] = kwargs["quantization_config"]
+        
+        # Attention 实现配置
         if "attn_implementation" in kwargs:
+            # 用户显式指定
             load_kwargs["attn_implementation"] = kwargs["attn_implementation"]
+        elif self.use_flash_attn:
+            # 自动使用 Flash Attention 2
+            load_kwargs["attn_implementation"] = "flash_attention_2"
 
-        self.model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
+        self.model: "PreTrainedModel" = AutoModelForCausalLM_.from_pretrained(
             model_path,
             **load_kwargs
         )
@@ -137,9 +241,9 @@ class PyTorchBackend(BaseBackend):
         self.model.eval()
 
         # 编译模型（PyTorch 2.0+）
-        if hasattr(torch, "compile") and kwargs.get("compile", False):
+        if hasattr(self._torch, "compile") and kwargs.get("compile", False):
             logger.info("Compiling model with torch.compile")
-            self.model = torch.compile(self.model, mode="reduce-overhead")
+            self.model = self._torch.compile(self.model, mode="reduce-overhead")
 
         logger.info(f"PyTorch model loaded successfully on {self.device_name}")
 
@@ -154,8 +258,6 @@ class PyTorchBackend(BaseBackend):
         Returns:
             生成的文本
         """
-        import time
-        
         start_time = time.time()
         prompt_tokens = len(self._tokenizer.encode(prompt))
         
@@ -259,6 +361,7 @@ class PyTorchBackend(BaseBackend):
             "device": self.device_name,
         }
         
+        torch = self._torch
         if self.device_name == "cuda" and torch.cuda.is_available():
             memory_info["allocated_mb"] = torch.cuda.memory_allocated() / 1024 / 1024
             memory_info["reserved_mb"] = torch.cuda.memory_reserved() / 1024 / 1024
@@ -280,6 +383,7 @@ class PyTorchBackend(BaseBackend):
         """
         logger.info(f"Warming up model with batch_size={batch_size}, seq_len={seq_len}")
         
+        torch = self._torch
         dummy_input = torch.zeros(
             batch_size, 
             seq_len, 
@@ -303,6 +407,6 @@ class PyTorchBackend(BaseBackend):
         del self._tokenizer
         
         if self.device_name == "cuda":
-            torch.cuda.empty_cache()
+            self._torch.cuda.empty_cache()
             
         logger.info("PyTorch backend cleaned up")
