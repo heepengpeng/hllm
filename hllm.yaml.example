@@ -1,0 +1,33 @@
+# HLLM 配置文件示例
+# 复制为 hllm.yaml 使用
+
+model:
+  path: "microsoft/Phi-3-mini-4k-instruct"
+  backend: "auto"  # auto, pytorch, mlx, paged_pytorch
+  device: null     # cpu, cuda, mps (PyTorch backend)
+  trust_remote_code: false
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+  workers: 1
+
+generation:
+  max_new_tokens: 100
+  temperature: 0.7
+  top_p: 0.9
+  top_k: 50
+  repetition_penalty: 1.0
+  stop_sequences: []
+
+paged_attention:
+  enabled: true
+  block_size: 16
+  num_blocks: 1024
+  max_num_seqs: 256
+
+logging:
+  level: "INFO"
+  format: "[%(asctime)s] %(levelname)s - %(message)s"
+  file: null  # 设置日志文件路径，如: "hllm.log"

@@ -4,7 +4,6 @@ HLLM OpenAI Compatible REST API Server (FastAPI)
 提供与 OpenAI API 兼容的 HTTP 服务。
 """
 
-import argparse
 import logging
 import time
 import uuid
@@ -13,6 +12,7 @@ from typing import List, Optional, Union, Literal
 from pydantic import BaseModel, Field
 
 from .model import HLLM
+from .config import get_config, ServerConfig, ModelConfig
 
 # 配置日志
 logging.basicConfig(
@@ -426,33 +426,121 @@ class Server:
         uvicorn.run(app, host=self.host, port=self.port, reload=reload)
 
 
-def main():
-    """命令行入口"""
-    parser = argparse.ArgumentParser(description="HLLM OpenAI Compatible REST API Server")
-    parser.add_argument("--model", required=True, help="Model path or HuggingFace model ID")
-    parser.add_argument("--backend", default="auto", choices=["auto", "pytorch", "mlx"],
-                        help="Inference backend (auto/pytorch/mlx)")
-    parser.add_argument("--device", default=None, help="Device for PyTorch backend (cpu/cuda/mps)")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
-    parser.add_argument("--port", type=int, default=8000, help="Port to bind")
-    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
-
-    args = parser.parse_args()
-
-    logger.info(f"Loading model from {args.model}...")
-    logger.info(f"Backend: {args.backend}")
+def main(
+    model: Optional[str] = None,
+    backend: Optional[str] = None,
+    device: Optional[str] = None,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    reload: bool = False,
+) -> None:
+    """
+    命令行入口
+    
+    Args:
+        model: 模型路径或 HuggingFace model ID
+        backend: 推理后端 (auto/pytorch/mlx/paged_pytorch)
+        device: 设备 (cpu/cuda/mps)
+        host: 监听地址
+        port: 监听端口
+        reload: 是否启用热重载
+        
+    Example:
+        >>> from hllm.server import main
+        >>> main(model="microsoft/Phi-3-mini-4k-instruct", port=8080)
+        
+        或使用命令行:
+        $ python -m hllm.server --model microsoft/Phi-3-mini-4k-instruct --port 8080
+    """
+    # 加载配置（支持环境变量和配置文件）
+    config = get_config()
+    
+    # 命令行参数覆盖配置文件
+    model_path = model or config.model.path
+    backend_name = backend or config.model.backend
+    device_name = device or config.model.device
+    host_addr = host or config.server.host
+    port_num = port or config.server.port
+    
+    logger.info(f"Loading model from {model_path}...")
+    logger.info(f"Backend: {backend_name}")
+    logger.info(f"Server: {host_addr}:{port_num}")
 
     # 构建模型参数
-    model_kwargs = {"backend": args.backend}
-    if args.device:
-        model_kwargs["device"] = args.device
+    model_kwargs: dict = {"backend": backend_name}
+    if device_name:
+        model_kwargs["device"] = device_name
 
-    model = HLLM(model_path=args.model, **model_kwargs)
-    logger.info(f"Model loaded. Backend info: {model.get_info()}")
+    model_instance = HLLM(model_path=model_path, **model_kwargs)
+    logger.info(f"Model loaded. Backend info: {model_instance.get_info()}")
 
-    server = Server(model, host=args.host, port=args.port)
-    server.start(reload=args.reload)
+    server = Server(model=model_instance, host=host_addr, port=port_num)
+    server.start(reload=reload or config.server.reload)
+
+
+def cli_main() -> None:
+    """CLI 入口点"""
+    import argparse
+    
+    config = get_config()
+    
+    parser = argparse.ArgumentParser(description="HLLM OpenAI Compatible REST API Server")
+    parser.add_argument(
+        "--model", 
+        default=config.model.path,
+        help="Model path or HuggingFace model ID"
+    )
+    parser.add_argument(
+        "--backend", 
+        default=config.model.backend,
+        choices=["auto", "pytorch", "mlx", "paged_pytorch"],
+        help="Inference backend"
+    )
+    parser.add_argument(
+        "--device", 
+        default=config.model.device,
+        help="Device for PyTorch backend (cpu/cuda/mps)"
+    )
+    parser.add_argument(
+        "--host", 
+        default=config.server.host,
+        help="Host to bind"
+    )
+    parser.add_argument(
+        "--port", 
+        type=int, 
+        default=config.server.port,
+        help="Port to bind"
+    )
+    parser.add_argument(
+        "--reload", 
+        action="store_true",
+        default=config.server.reload,
+        help="Enable auto-reload"
+    )
+    parser.add_argument(
+        "--config",
+        help="Path to config file (YAML)"
+    )
+
+    args = parser.parse_args()
+    
+    # 如果指定了配置文件，重新加载
+    if args.config:
+        from .config import reload_config
+        import os
+        os.environ["HLLM_CONFIG_FILE"] = args.config
+        reload_config()
+
+    main(
+        model=args.model,
+        backend=args.backend,
+        device=args.device,
+        host=args.host,
+        port=args.port,
+        reload=args.reload
+    )
 
 
 if __name__ == "__main__":
-    main()
+    cli_main()
