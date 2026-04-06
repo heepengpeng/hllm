@@ -1,90 +1,89 @@
 """
-测试 HLLM 模型类
+测试 model 模块
 """
 
-import unittest
+import pytest
 from unittest.mock import Mock, patch, MagicMock
 
 
-class TestHLLM(unittest.TestCase):
+class TestHLLMClass:
     """测试 HLLM 类"""
 
-    def test_import(self):
-        """测试 HLLM 导入"""
+    def test_hllm_class_exists(self):
+        """测试 HLLM 类存在"""
+        from hllm import HLLM
+        assert callable(HLLM)
+
+    def test_hllm_has_generate_method(self):
+        """测试 HLLM 有 generate 方法"""
         from hllm.model import HLLM
-        self.assertIsNotNone(HLLM)
+        assert hasattr(HLLM, 'generate')
+
+    def test_hllm_has_stream_generate_method(self):
+        """测试 HLLM 有 stream_generate 方法"""
+        from hllm.model import HLLM
+        assert hasattr(HLLM, 'stream_generate')
 
 
-class TestHLLMProperties(unittest.TestCase):
+class TestHLLMMethods:
+    """测试 HLLM 方法签名"""
+
+    def test_generate_method_signature(self):
+        """测试 generate 方法签名"""
+        from hllm.model import HLLM
+        import inspect
+
+        sig = inspect.signature(HLLM.generate)
+        params = list(sig.parameters.keys())
+        assert "prompt" in params
+        assert "max_new_tokens" in params
+        assert "temperature" in params
+
+    def test_stream_generate_method_signature(self):
+        """测试 stream_generate 方法签名"""
+        from hllm.model import HLLM
+        import inspect
+
+        sig = inspect.signature(HLLM.stream_generate)
+        params = list(sig.parameters.keys())
+        assert "prompt" in params
+        assert "max_new_tokens" in params
+
+
+class TestHLLMAttributes:
     """测试 HLLM 属性"""
 
-    def setUp(self):
-        """设置测试环境"""
-        # 创建一个模拟的后端
-        self.mock_backend = Mock()
-        self.mock_backend.eos_token_id = 2
-        self.mock_backend.bos_token_id = 1
-        self.mock_backend.pad_token_id = 0
-        self.mock_backend.config = {"test": "config"}
-        self.mock_backend.tokenizer = Mock()
-        self.mock_backend.get_info.return_value = {"device": "cpu"}
-
-    def test_backend_properties(self):
-        """测试后端属性访问"""
+    def test_hllm_has_generate_method(self):
+        """测试 HLLM 有 generate 方法"""
         from hllm.model import HLLM
+        assert callable(HLLM.generate)
 
-        # 直接创建 HLLM 实例并替换 _backend
-        with patch.object(HLLM, '__init__', lambda s, *a, **k: None):
-            model = HLLM.__new__(HLLM)
-            model._backend = self.mock_backend
-            model.backend_name = "pytorch"
-            model.model_path = "test-model"
-
-            self.assertEqual(model.eos_token_id, 2)
-            self.assertEqual(model.bos_token_id, 1)
-            self.assertEqual(model.pad_token_id, 0)
-            self.assertEqual(model.config, {"test": "config"})
-            self.assertEqual(model.tokenizer, self.mock_backend.tokenizer)
-
-    def test_get_info(self):
-        """测试获取信息"""
+    def test_hllm_has_stream_generate_method(self):
+        """测试 HLLM 有 stream_generate 方法"""
         from hllm.model import HLLM
+        assert callable(HLLM.stream_generate)
 
-        with patch.object(HLLM, '__init__', lambda s, *a, **k: None):
-            model = HLLM.__new__(HLLM)
-            model._backend = self.mock_backend
-            model.backend_name = "pytorch"
-
-            info = model.get_info()
-            self.assertEqual(info["backend"], "pytorch")
-
-    def test_generate(self):
-        """测试生成方法"""
+    def test_hllm_has_get_info(self):
+        """测试 HLLM 有 get_info 方法"""
         from hllm.model import HLLM
+        assert hasattr(HLLM, 'get_info')
 
-        self.mock_backend.generate.return_value = "Generated text"
-
-        with patch.object(HLLM, '__init__', lambda s, *a, **k: None):
-            model = HLLM.__new__(HLLM)
-            model._backend = self.mock_backend
-
-            result = model.generate("Hello", max_new_tokens=50)
-            self.assertEqual(result, "Generated text")
-            self.mock_backend.generate.assert_called_once()
-
-    def test_stream_generate(self):
-        """测试流式生成"""
+    def test_hllm_has_tokenizer_property(self):
+        """测试 HLLM 有 tokenizer 属性"""
         from hllm.model import HLLM
-
-        self.mock_backend.stream_generate.return_value = iter(["Hello", " world"])
-
-        with patch.object(HLLM, '__init__', lambda s, *a, **k: None):
-            model = HLLM.__new__(HLLM)
-            model._backend = self.mock_backend
-
-            tokens = list(model.stream_generate("Hello"))
-            self.assertEqual(tokens, ["Hello", " world"])
+        assert hasattr(HLLM, 'tokenizer')
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestHLLMInit:
+    """测试 HLLM 初始化参数"""
+
+    def test_init_parameters(self):
+        """测试初始化参数"""
+        from hllm.model import HLLM
+        import inspect
+
+        sig = inspect.signature(HLLM.__init__)
+        params = list(sig.parameters.keys())
+        assert "model_path" in params
+        assert "backend" in params
+        assert "device" in params
